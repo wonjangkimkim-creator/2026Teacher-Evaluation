@@ -1,0 +1,2264 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>2026 선생님 평가 대시보드</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700;900&display=swap" rel="stylesheet">
+
+<!-- Tailwind CDN -->
+<script src="https://cdn.tailwindcss.com"></script>
+
+<!-- React + ReactDOM (UMD) -->
+<script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.production.min.js"></script>
+<script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js"></script>
+
+<!-- Babel Standalone (JSX 변환) -->
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+<!-- Recharts -->
+<script crossorigin src="https://unpkg.com/prop-types@15.8.1/prop-types.min.js"></script>
+<script crossorigin src="https://unpkg.com/recharts@2.15.0/umd/Recharts.js"></script>
+
+<!-- SheetJS (엑셀 파싱) -->
+<script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
+
+<style>
+  * { font-family: 'Noto Sans KR', -apple-system, BlinkMacSystemFont, 'Apple SD Gothic Neo', sans-serif; }
+  body { margin: 0; background: #f8fafc; }
+  /* 로딩 화면 */
+  #loader { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; background: #f8fafc; z-index: 1000; }
+  #loader.hidden { display: none; }
+  .spinner { width: 40px; height: 40px; border: 3px solid #e2e8f0; border-top-color: #0f172a; border-radius: 50%; animation: spin 0.8s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+</style>
+</head>
+<body>
+<div id="loader"><div class="spinner"></div></div>
+<div id="root"></div>
+
+<script type="text/babel" data-presets="react">
+// ============ localStorage 어댑터 (window.storage 시뮬레이션) ============
+const STORAGE_PREFIX = 'dashboard_';
+window.storage = {
+  async get(key) {
+    const value = localStorage.getItem(STORAGE_PREFIX + key);
+    return value === null ? null : { key, value, shared: false };
+  },
+  async set(key, value) {
+    try {
+      localStorage.setItem(STORAGE_PREFIX + key, value);
+      return { key, value, shared: false };
+    } catch (e) {
+      console.error('localStorage 저장 실패:', e);
+      return null;
+    }
+  },
+  async delete(key) {
+    localStorage.removeItem(STORAGE_PREFIX + key);
+    return { key, deleted: true, shared: false };
+  }
+};
+
+// ============ React, Recharts, XLSX 글로벌 구조분해 ============
+const { useState, useEffect, useMemo, useRef } = React;
+const { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Radar } = Recharts;
+
+
+// ============ Lucide-style 아이콘 (SVG) ============
+const SvgIcon = ({ size = 24, className, children, ...props }) =>
+  React.createElement('svg', {
+    xmlns: 'http://www.w3.org/2000/svg',
+    width: size,
+    height: size,
+    viewBox: '0 0 24 24',
+    fill: 'none',
+    stroke: 'currentColor',
+    strokeWidth: 2,
+    strokeLinecap: 'round',
+    strokeLinejoin: 'round',
+    className: className,
+    ...props
+  }, children);
+
+const Upload = (p) => <SvgIcon {...p}>
+  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+  <polyline points="17 8 12 3 7 8"/>
+  <line x1="12" y1="3" x2="12" y2="15"/>
+</SvgIcon>;
+const Trash2 = (p) => <SvgIcon {...p}>
+  <polyline points="3 6 5 6 21 6"/>
+  <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/>
+  <path d="M10 11v6"/><path d="M14 11v6"/>
+  <path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/>
+</SvgIcon>;
+const Download = (p) => <SvgIcon {...p}>
+  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+  <polyline points="7 10 12 15 17 10"/>
+  <line x1="12" y1="15" x2="12" y2="3"/>
+</SvgIcon>;
+const FileUp = (p) => <SvgIcon {...p}>
+  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+  <polyline points="14 2 14 8 20 8"/>
+  <path d="M12 12v6"/>
+  <polyline points="9 15 12 12 15 15"/>
+</SvgIcon>;
+const RefreshCw = (p) => <SvgIcon {...p}>
+  <polyline points="23 4 23 10 17 10"/>
+  <polyline points="1 20 1 14 7 14"/>
+  <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
+</SvgIcon>;
+const Award = (p) => <SvgIcon {...p}>
+  <circle cx="12" cy="8" r="7"/>
+  <polyline points="8.21 13.89 7 23 12 20 17 23 15.79 13.88"/>
+</SvgIcon>;
+const TrendingUp = (p) => <SvgIcon {...p}>
+  <polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/>
+  <polyline points="17 6 23 6 23 12"/>
+</SvgIcon>;
+const TrendingDown = (p) => <SvgIcon {...p}>
+  <polyline points="23 18 13.5 8.5 8.5 13.5 1 6"/>
+  <polyline points="17 18 23 18 23 12"/>
+</SvgIcon>;
+const Users = (p) => <SvgIcon {...p}>
+  <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
+  <circle cx="9" cy="7" r="4"/>
+  <path d="M23 21v-2a4 4 0 0 0-3-3.87"/>
+  <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
+</SvgIcon>;
+const AlertCircle = (p) => <SvgIcon {...p}>
+  <circle cx="12" cy="12" r="10"/>
+  <line x1="12" y1="8" x2="12" y2="12"/>
+  <line x1="12" y1="16" x2="12.01" y2="16"/>
+</SvgIcon>;
+const Check = (p) => <SvgIcon {...p}>
+  <polyline points="20 6 9 17 4 12"/>
+</SvgIcon>;
+const Link2 = (p) => <SvgIcon {...p}>
+  <path d="M15 7h3a5 5 0 0 1 5 5 5 5 0 0 1-5 5h-3m-6 0H6a5 5 0 0 1-5-5 5 5 0 0 1 5-5h3"/>
+  <line x1="8" y1="12" x2="16" y2="12"/>
+</SvgIcon>;
+const Trophy = (p) => <SvgIcon {...p}>
+  <path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6"/>
+  <path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18"/>
+  <path d="M4 22h16"/>
+  <path d="M10 14.66V17c0 .55-.47.98-.97 1.21C7.85 18.75 7 20.24 7 22"/>
+  <path d="M14 14.66V17c0 .55.47.98.97 1.21C16.15 18.75 17 20.24 17 22"/>
+  <path d="M18 2H6v7a6 6 0 0 0 12 0V2Z"/>
+</SvgIcon>;
+const Star = (p) => <SvgIcon {...p}>
+  <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>
+</SvgIcon>;
+const Sparkles = (p) => <SvgIcon {...p}>
+  <path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z"/>
+  <path d="M20 3v4"/><path d="M22 5h-4"/><path d="M4 17v2"/><path d="M5 18H3"/>
+</SvgIcon>;
+const Target = (p) => <SvgIcon {...p}>
+  <circle cx="12" cy="12" r="10"/>
+  <circle cx="12" cy="12" r="6"/>
+  <circle cx="12" cy="12" r="2"/>
+</SvgIcon>;
+const AlertTriangle = (p) => <SvgIcon {...p}>
+  <path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+  <line x1="12" y1="9" x2="12" y2="13"/>
+  <line x1="12" y1="17" x2="12.01" y2="17"/>
+</SvgIcon>;
+const ThumbsUp = (p) => <SvgIcon {...p}>
+  <path d="M7 10v12"/>
+  <path d="M15 5.88 14 10h5.83a2 2 0 0 1 1.92 2.56l-2.33 8A2 2 0 0 1 17.5 22H4a2 2 0 0 1-2-2v-8a2 2 0 0 1 2-2h2.76a2 2 0 0 0 1.79-1.11L12 2a3.13 3.13 0 0 1 3 3.88Z"/>
+</SvgIcon>;
+const Minus = (p) => <SvgIcon {...p}>
+  <line x1="5" y1="12" x2="19" y2="12"/>
+</SvgIcon>;
+
+// recharts에서 사용하지 않은 컴포넌트 호환을 위해
+const BarChart = Recharts.BarChart;
+const Bar = Recharts.Bar;
+const Cell = Recharts.Cell;
+
+
+// ============ 기본 팀 구성 ============
+const DEFAULT_TEAMS = {
+  '박유경팀': ['박유경', '정서현', '성창훈', '이수진'],
+  '강지성팀': ['강지성', '성민주', '김민재', '이정수']
+};
+
+const MONTH_ORDER = ['1월', '2월', '3월', '4월', '5월', '6월', '7월', '8월', '9월', '10월', '11월', '12월'];
+const ITEMS = ['재원', '매출액', '지각', '퇴원생', '오답노트', '오답일지', '데스크', '원장', '테스트', '개념나래'];
+// 항목별: 양수가 좋은지(true) / 음수가 좋은지(false). 지각/퇴원생은 음수일수록 나쁘므로 0에 가까울수록 좋음
+const ITEM_POLARITY = { 재원: 1, 매출액: 1, 지각: -1, 퇴원생: -1, 오답노트: 1, 오답일지: 1, 데스크: 1, 원장: 1, 테스트: 1, 개념나래: 1 };
+
+// ============ 초기 시드 (1~4월) ============
+const SEED_DATA = {
+  '1월': {
+    '박유경': { 재원: null, 매출액: 8, 지각: 0, 퇴원생: -6, 오답노트: 0, 오답일지: 7, 데스크: 9, 원장: 4, 테스트: 0, 개념나래: 0, 총점: 22 },
+    '정서현': { 재원: null, 매출액: 18, 지각: -1, 퇴원생: -2, 오답노트: 0, 오답일지: 2, 데스크: 8, 원장: 9, 테스트: 0, 개념나래: 0, 총점: 34 },
+    '성창훈': { 재원: null, 매출액: 12, 지각: -12, 퇴원생: -6, 오답노트: 0, 오답일지: 3, 데스크: 4, 원장: 1, 테스트: 0, 개념나래: 0, 총점: 2 },
+    '이수진': { 재원: null, 매출액: 10, 지각: -1, 퇴원생: -3, 오답노트: 3, 오답일지: 12, 데스크: 3, 원장: 6, 테스트: 2, 개념나래: 0, 총점: 32 },
+    '강지성': { 재원: null, 매출액: 2, 지각: -1, 퇴원생: -3, 오답노트: 5, 오답일지: 1, 데스크: 6, 원장: 3, 테스트: 0, 개념나래: 0, 총점: 13 },
+    '성민주': { 재원: null, 매출액: 16, 지각: 0, 퇴원생: -5, 오답노트: 3, 오답일지: 9, 데스크: 7, 원장: 8, 테스트: 8, 개념나래: 0, 총점: 46 },
+    '김민재': { 재원: null, 매출액: 6, 지각: 0, 퇴원생: -2, 오답노트: 0, 오답일지: 4, 데스크: 2, 원장: 5, 테스트: 0, 개념나래: 0, 총점: 15 },
+    '이정수': { 재원: null, 매출액: 14, 지각: 0, 퇴원생: -6, 오답노트: 0, 오답일지: 3, 데스크: 5, 원장: 7, 테스트: 0, 개념나래: 0, 총점: 23 },
+  },
+  '2월': {
+    '박유경': { 재원: null, 매출액: 10, 지각: 0, 퇴원생: 0, 오답노트: 3, 오답일지: 4, 데스크: 9, 원장: 5, 테스트: 6, 개념나래: 0, 총점: 37 },
+    '정서현': { 재원: null, 매출액: 18, 지각: 0, 퇴원생: -1, 오답노트: 0, 오답일지: 3, 데스크: 7, 원장: 9, 테스트: 0, 개념나래: 0, 총점: 36 },
+    '성창훈': { 재원: null, 매출액: 4, 지각: -8, 퇴원생: 0, 오답노트: 1, 오답일지: 1, 데스크: 2, 원장: 1, 테스트: 0, 개념나래: 0, 총점: 1 },
+    '이수진': { 재원: null, 매출액: 14, 지각: 0, 퇴원생: -2, 오답노트: 1, 오답일지: 6, 데스크: 5, 원장: 8, 테스트: 2, 개념나래: 0, 총점: 34 },
+    '강지성': { 재원: null, 매출액: 12, 지각: 0, 퇴원생: 0, 오답노트: 3, 오답일지: 0, 데스크: 4, 원장: 7, 테스트: 0, 개념나래: 0, 총점: 26 },
+    '성민주': { 재원: null, 매출액: 16, 지각: 0, 퇴원생: -6, 오답노트: 5, 오답일지: 8, 데스크: 8, 원장: 6, 테스트: 6, 개념나래: 0, 총점: 43 },
+    '김민재': { 재원: null, 매출액: 2, 지각: -2, 퇴원생: -2, 오답노트: 1, 오답일지: 4, 데스크: 3, 원장: 3, 테스트: 0, 개념나래: 0, 총점: 9 },
+    '이정수': { 재원: null, 매출액: 8, 지각: 0, 퇴원생: -1, 오답노트: 0, 오답일지: 7, 데스크: 6, 원장: 4, 테스트: 8, 개념나래: 0, 총점: 32 },
+  },
+  '3월': {
+    '박유경': { 재원: 31, 매출액: 18, 지각: 0, 퇴원생: -4, 오답노트: 3, 오답일지: 7, 데스크: 9, 원장: 9, 테스트: 4, 개념나래: 25, 총점: 71 },
+    '정서현': { 재원: 29, 매출액: 12, 지각: 0, 퇴원생: -7, 오답노트: 0, 오답일지: 0, 데스크: 7, 원장: 5, 테스트: 4, 개념나래: 4, 총점: 25 },
+    '성창훈': { 재원: 21, 매출액: 6, 지각: -11, 퇴원생: -4, 오답노트: 5, 오답일지: 8, 데스크: 3, 원장: 1, 테스트: 0, 개념나래: 3, 총점: 11 },
+    '이수진': { 재원: 28, 매출액: 16, 지각: 0, 퇴원생: -4, 오답노트: 3, 오답일지: 8, 데스크: 6, 원장: 8, 테스트: 2, 개념나래: 0, 총점: 39 },
+    '강지성': { 재원: 18, 매출액: 8, 지각: 0, 퇴원생: -4, 오답노트: 1, 오답일지: 2, 데스크: 4, 원장: 4, 테스트: 0, 개념나래: 0, 총점: 15 },
+    '성민주': { 재원: 29, 매출액: 10, 지각: 0, 퇴원생: -4, 오답노트: 1, 오답일지: 15, 데스크: 8, 원장: 6, 테스트: 4, 개념나래: 14, 총점: 54 },
+    '김민재': { 재원: 18, 매출액: 4, 지각: -4, 퇴원생: -3, 오답노트: 0, 오답일지: 3, 데스크: 2, 원장: 3, 테스트: 0, 개념나래: 0, 총점: 5 },
+    '이정수': { 재원: 31, 매출액: 14, 지각: 0, 퇴원생: -2, 오답노트: 0, 오답일지: 7, 데스크: 5, 원장: 8, 테스트: 8, 개념나래: 5, 총점: 45 },
+  },
+  '4월': {
+    '박유경': { 재원: 31, 매출액: 10, 지각: 0, 퇴원생: -1, 오답노트: 5, 오답일지: 8, 데스크: 9, 원장: 5, 테스트: 0, 개념나래: 1, 총점: 37 },
+    '정서현': { 재원: 29, 매출액: 14, 지각: -1, 퇴원생: -1, 오답노트: 0, 오답일지: 0, 데스크: 7, 원장: 7, 테스트: 0, 개념나래: 0, 총점: 26 },
+    '성창훈': { 재원: 21, 매출액: 4, 지각: -13, 퇴원생: 0, 오답노트: 0, 오답일지: 5, 데스크: 2, 원장: 1, 테스트: 0, 개념나래: 0, 총점: -1 },
+    '이수진': { 재원: 29, 매출액: 8, 지각: -3, 퇴원생: -3, 오답노트: 1, 오답일지: 14, 데스크: 6, 원장: 3, 테스트: 0, 개념나래: 0, 총점: 26 },
+    '강지성': { 재원: 20, 매출액: 6, 지각: -1, 퇴원생: 0, 오답노트: 0, 오답일지: 1, 데스크: 4, 원장: 4, 테스트: 0, 개념나래: 2, 총점: 16 },
+    '성민주': { 재원: 28, 매출액: 12, 지각: 0, 퇴원생: -1, 오답노트: 3, 오답일지: 11, 데스크: 8, 원장: 6, 테스트: 4, 개념나래: 1, 총점: 44 },
+    '김민재': { 재원: 16, 매출액: 2, 지각: -5, 퇴원생: -2, 오답노트: 3, 오답일지: 3, 데스크: 3, 원장: 2, 테스트: 6, 개념나래: 0, 총점: 12 },
+    '이정수': { 재원: 31, 매출액: 16, 지각: 0, 퇴원생: -1, 오답노트: 0, 오답일지: 2, 데스크: 5, 원장: 8, 테스트: 0, 개념나래: 0, 총점: 30 },
+  }
+};
+
+// ============ 유틸리티 ============
+const getMonthIndex = (m) => MONTH_ORDER.indexOf(m);
+const sortMonths = (months) => [...months].sort((a, b) => getMonthIndex(a) - getMonthIndex(b));
+const getTeamOf = (name, teams) => {
+  for (const [tname, members] of Object.entries(teams)) {
+    if (members.includes(name)) return tname;
+  }
+  return null;
+};
+const teamColor = (tname) => {
+  if (tname === '박유경팀') return { primary: '#2563eb', light: '#dbeafe', bg: '#eff6ff', accent: '#1e40af', emoji: '🔵' };
+  if (tname === '강지성팀') return { primary: '#9333ea', light: '#f3e8ff', bg: '#faf5ff', accent: '#6b21a8', emoji: '🟣' };
+  return { primary: '#6b7280', light: '#f3f4f6', bg: '#f9fafb', accent: '#374151', emoji: '⚪' };
+};
+const rankEmoji = (rank) => rank === 1 ? '🥇' : rank === 2 ? '🥈' : rank === 3 ? '🥉' : `${rank}위`;
+
+// ============ 엑셀 파싱 ============
+const parseExcelFile = async (file) => {
+  const buf = await file.arrayBuffer();
+  const wb = XLSX.read(buf, { type: 'array' });
+  const filenameMatch = file.name.match(/(\d{1,2})월/);
+  let monthFromFilename = filenameMatch ? `${filenameMatch[1]}월` : null;
+  const monthSheets = wb.SheetNames.filter(n => /^\d{1,2}월$/.test(n));
+
+  let targetSheet;
+  let detectedMonth = monthFromFilename;
+  if (monthSheets.length === 1) {
+    targetSheet = monthSheets[0];
+    if (!detectedMonth) detectedMonth = targetSheet;
+  } else if (monthSheets.length > 1) {
+    targetSheet = wb.SheetNames.find(n => n === monthFromFilename) || monthSheets[0];
+    if (!detectedMonth) detectedMonth = targetSheet;
+  } else {
+    targetSheet = wb.SheetNames[0];
+  }
+
+  const ws = wb.Sheets[targetSheet];
+  const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: null });
+  const header = rows[0] || [];
+  const colMap = {};
+  header.forEach((h, idx) => {
+    if (h === '재원') colMap.재원 = idx;
+    else if (h === '매출액') colMap.매출액 = idx;
+    else if (h === '지각') colMap.지각 = idx;
+    else if (h === '퇴원생') colMap.퇴원생 = idx;
+    else if (h === '오답노트') colMap.오답노트 = idx;
+    else if (h === '오답일지') colMap.오답일지 = idx;
+    else if (h === '데스크') colMap.데스크 = idx;
+    else if (h === '원장') colMap.원장 = idx;
+    else if (h === '프리테스트' || h === '클린테스트' || h === '테스트') colMap.테스트 = idx;
+    else if (h === '개념나래') colMap.개념나래 = idx;
+    else if (h === '총점') colMap.총점 = idx;
+  });
+
+  const teachers = {};
+  for (let i = 1; i < Math.min(rows.length, 20); i++) {
+    const row = rows[i];
+    if (!row || !row[0] || typeof row[0] !== 'string') continue;
+    const name = row[0].trim();
+    if (name === '' || name.includes('월') || name.includes('합계')) continue;
+    const get = (key) => colMap[key] !== undefined ? row[colMap[key]] : null;
+    teachers[name] = {
+      재원: get('재원'),
+      매출액: get('매출액') ?? 0,
+      지각: get('지각') ?? 0,
+      퇴원생: get('퇴원생') ?? 0,
+      오답노트: get('오답노트') ?? 0,
+      오답일지: get('오답일지') ?? 0,
+      데스크: get('데스크') ?? 0,
+      원장: get('원장') ?? 0,
+      테스트: get('테스트') ?? 0,
+      개념나래: get('개념나래') ?? 0,
+      총점: get('총점') ?? 0,
+    };
+  }
+  return { month: detectedMonth, teachers, sheetName: targetSheet };
+};
+
+// ============ 분석 함수 ============
+// 항목별 순위 계산 (1=최고)
+const rankInItem = (data, month, item, teachers) => {
+  const list = teachers.map(name => ({
+    name,
+    value: data[month]?.[name]?.[item] ?? 0
+  }));
+  // 정렬: polarity 양수면 큰 값이 좋음(내림차순), 음수면 0에 가까운 값(=큰 값)이 좋음(내림차순 동일)
+  list.sort((a, b) => b.value - a.value);
+  const rankMap = {};
+  list.forEach((entry, idx) => { rankMap[entry.name] = idx + 1; });
+  return rankMap;
+};
+
+// 자동 피드백 생성
+const generateFeedback = (name, data, teams, allMonths, allTeachers) => {
+  const latestMonth = allMonths[allMonths.length - 1];
+  const prevMonth = allMonths[allMonths.length - 2];
+  const firstMonth = allMonths[0];
+  const team = getTeamOf(name, teams);
+  const teamMembers = teams[team] || [];
+
+  const feedback = {
+    strengths: [],
+    weaknesses: [],
+    changes: [],
+    rankings: [],
+    summary: ''
+  };
+
+  if (!latestMonth || !data[latestMonth]?.[name]) return feedback;
+
+  const latest = data[latestMonth][name];
+  const prev = prevMonth ? data[prevMonth]?.[name] : null;
+
+  // 1) 항목별 순위 계산 (전체 강사 대비)
+  ITEMS.forEach(item => {
+    const ranks = rankInItem(data, latestMonth, item, allTeachers);
+    const myRank = ranks[name];
+    if (myRank <= 3 && latest[item] !== null && latest[item] !== 0) {
+      feedback.rankings.push({ item, rank: myRank, value: latest[item], type: 'top' });
+    }
+    if (myRank >= allTeachers.length - 1 && latest[item] !== null) {
+      const isBad = ITEM_POLARITY[item] === -1 ? latest[item] < 0 : latest[item] < 3;
+      if (isBad) feedback.rankings.push({ item, rank: myRank, value: latest[item], type: 'bottom' });
+    }
+  });
+
+  // 2) 강점/약점 (팀 내 비교)
+  ITEMS.forEach(item => {
+    const teamValues = teamMembers.map(n => data[latestMonth]?.[n]?.[item] ?? 0);
+    const teamAvg = teamValues.reduce((a, b) => a + b, 0) / teamValues.length;
+    const myValue = latest[item] ?? 0;
+    if (ITEM_POLARITY[item] === 1) {
+      if (myValue > teamAvg * 1.3 && myValue > 0) {
+        feedback.strengths.push({ item, value: myValue, teamAvg: Math.round(teamAvg * 10) / 10 });
+      }
+      if (myValue < teamAvg * 0.5 && teamAvg > 1) {
+        feedback.weaknesses.push({ item, value: myValue, teamAvg: Math.round(teamAvg * 10) / 10 });
+      }
+    } else {
+      // 지각/퇴원생: 0에 가까울수록 좋음
+      if (myValue > teamAvg && myValue >= -1) {
+        feedback.strengths.push({ item, value: myValue, teamAvg: Math.round(teamAvg * 10) / 10 });
+      }
+      if (myValue < teamAvg - 2 && myValue < -3) {
+        feedback.weaknesses.push({ item, value: myValue, teamAvg: Math.round(teamAvg * 10) / 10 });
+      }
+    }
+  });
+
+  // 3) 전월 대비 변화
+  if (prev) {
+    const totalChange = (latest.총점 ?? 0) - (prev.총점 ?? 0);
+    feedback.changes.push({ kind: '총점', change: totalChange, latest: latest.총점, prev: prev.총점 });
+
+    // 가장 향상된/하락한 항목 찾기
+    const itemChanges = ITEMS.map(item => ({
+      item,
+      change: (latest[item] ?? 0) - (prev[item] ?? 0),
+      latest: latest[item],
+      prev: prev[item]
+    })).filter(c => c.change !== 0);
+
+    const improved = itemChanges.filter(c => c.change * ITEM_POLARITY[c.item] > 0).sort((a, b) => Math.abs(b.change) - Math.abs(a.change));
+    const declined = itemChanges.filter(c => c.change * ITEM_POLARITY[c.item] < 0).sort((a, b) => Math.abs(b.change) - Math.abs(a.change));
+
+    if (improved[0]) feedback.changes.push({ kind: '개선', item: improved[0].item, change: improved[0].change });
+    if (declined[0]) feedback.changes.push({ kind: '하락', item: declined[0].item, change: declined[0].change });
+  }
+
+  // 4) 1월 → 최신월 누적 변화
+  if (firstMonth && firstMonth !== latestMonth) {
+    const totalGrowth = (latest.총점 ?? 0) - (data[firstMonth]?.[name]?.총점 ?? 0);
+    feedback.summary = totalGrowth >= 0
+      ? `${firstMonth} 대비 ${totalGrowth >= 0 ? '+' : ''}${totalGrowth}점 ${totalGrowth > 0 ? '성장했습니다' : '유지하고 있습니다'}`
+      : `${firstMonth} 대비 ${totalGrowth}점 하락했습니다. 회복이 필요합니다`;
+  }
+
+  return feedback;
+};
+
+// ============ 종합 평가 (따뜻한 톤) ============
+// 항목별 따뜻한 강점 표현
+const ITEM_NICE = {
+  재원: ['많은 학생들이 선생님을 따르고 있어요', '재원생 관리가 정말 안정적이세요', '학생들과의 신뢰가 단단히 쌓여있는 게 느껴져요'],
+  매출액: ['매출 부분에서 든든한 성과를 만들어주고 계세요', '수업 운영이 잘 이루어지고 있다는 증거예요', '실질적인 성과로 보답해주시네요'],
+  지각: ['시간 약속을 잘 지켜주셔서 든든합니다', '꾸준한 출근으로 모범을 보여주시네요', '책임감이 느껴지는 부분이에요'],
+  퇴원생: ['학생들을 잘 지켜내고 계세요', '학생 유지 관리가 정말 안정적이세요', '학생들이 떠나지 않는 데는 이유가 있는 것 같아요'],
+  오답노트: ['오답노트 지도를 꼼꼼히 해주시네요', '학생들의 약점을 잘 잡아주고 계세요', '학습 관리가 세심하세요'],
+  오답일지: ['오답일지 작성에서 정말 부지런하시네요', '꾸준한 기록이 학생들에게 큰 자산이 되고 있어요', '성실함이 빛나는 부분이에요'],
+  데스크: ['데스크 업무를 깔끔하게 처리해주시는 모습이 인상적이에요', '학부모님 응대가 안정적이세요', '학원의 첫인상을 책임져주고 계시네요'],
+  원장: ['원장님과의 협업이 원활해서 좋습니다', '소통이 매끄러운 게 큰 강점이에요', '팀워크에 큰 도움이 되고 계세요'],
+  테스트: ['테스트 진행이 체계적이세요', '평가 부분에서 두각을 나타내고 계세요', '학생들의 실력을 잘 점검해주고 계시네요'],
+  개념나래: ['개념나래 운영이 정말 뛰어나세요', '개념나래에서 큰 성과를 만들어주고 계십니다', '새로운 영역에서도 두각을 나타내시네요']
+};
+
+// 항목별 부드러운 개선 표현
+const ITEM_IMPROVE = {
+  재원: '재원생 관리에 조금만 더 마음을 써주시면 더 좋아질 것 같아요',
+  매출액: '매출 부분에서 조금 더 적극적인 시도를 해보시면 어떨까요',
+  지각: '출근 시간을 조금만 더 챙겨주시면 좋겠어요',
+  퇴원생: '학생들이 떠나는 이유를 한번 들여다봐주시면 도움이 될 것 같아요',
+  오답노트: '오답노트를 조금 더 자주 활용해보시면 좋겠어요',
+  오답일지: '오답일지 작성을 좀 더 챙겨주시면 학생들이 더 좋아할 거예요',
+  데스크: '데스크 업무에 조금만 더 시간을 투자해보시면 어떨까요',
+  원장: '원장님과의 소통을 조금 더 자주 가져보시면 좋겠어요',
+  테스트: '테스트 진행을 조금 더 활성화해보시면 좋겠어요',
+  개념나래: '개념나래에 도전해보시면 새로운 가능성이 열릴 거예요'
+};
+
+const generateNarrativeFeedback = (name, data, teams, allMonths, allTeachers) => {
+  const latestMonth = allMonths[allMonths.length - 1];
+  const prevMonth = allMonths.length >= 2 ? allMonths[allMonths.length - 2] : null;
+  const firstMonth = allMonths[0];
+  const team = getTeamOf(name, teams);
+  const teamMembers = teams[team] || [];
+
+  if (!latestMonth || !data[latestMonth]?.[name]) {
+    return { overall: '', goodPoints: [], improvements: [], closing: '' };
+  }
+
+  const latest = data[latestMonth][name];
+  const myScore = latest.총점 ?? 0;
+
+  // 전체 순위
+  const ranking = allTeachers.map(n => ({ name: n, score: data[latestMonth]?.[n]?.총점 ?? 0 })).sort((a, b) => b.score - a.score);
+  const myRank = ranking.findIndex(r => r.name === name) + 1;
+  const totalCount = ranking.length;
+
+  // 팀 내 순위
+  const teamRanking = teamMembers.map(n => ({ name: n, score: data[latestMonth]?.[n]?.총점 ?? 0 })).sort((a, b) => b.score - a.score);
+  const teamRank = teamRanking.findIndex(r => r.name === name) + 1;
+
+  // 변화
+  const firstScore = data[firstMonth]?.[name]?.총점 ?? 0;
+  const totalGrowth = myScore - firstScore;
+  const prevScore = prevMonth ? (data[prevMonth]?.[name]?.총점 ?? 0) : null;
+  const monthChange = prevScore !== null ? myScore - prevScore : 0;
+
+  // 패턴 판단
+  const isTopRank = myRank <= 2;
+  const isMidRank = myRank >= 3 && myRank <= 5;
+  const isLowRank = myRank >= 6;
+  const isGrowing = totalGrowth >= 8;
+  const isStable = Math.abs(totalGrowth) < 8;
+  const isDeclining = totalGrowth <= -8;
+  const isRecentlyImproved = monthChange >= 5;
+  const isRecentlyDeclined = monthChange <= -5;
+
+  // ============ 1) 종합 평가 ============
+  let overall = '';
+  if (isTopRank && isGrowing) {
+    overall = `${name} 선생님, 이번 ${latestMonth}에도 전체 ${myRank}위라는 멋진 성과를 만들어주셨네요. ${firstMonth}부터 ${totalGrowth}점이나 성장하신 모습은 정말 인상적입니다. 꾸준한 노력이 이렇게 결실로 이어지고 있다는 게 느껴져서 정말 보기 좋아요.`;
+  } else if (isTopRank) {
+    overall = `${name} 선생님, ${latestMonth} 전체 ${myRank}위로 변함없는 실력을 보여주고 계시네요. 이 자리를 지키는 것 자체가 결코 쉬운 일이 아닌데, 늘 안정적으로 잘 해주셔서 정말 감사한 마음입니다.`;
+  } else if (isMidRank && isGrowing) {
+    overall = `${name} 선생님, ${firstMonth}부터 꾸준히 성장하고 계신 모습이 정말 멋져요. ${latestMonth}에는 전체 ${myRank}위로, 이제 곧 더 높은 자리도 충분히 가능해 보입니다. 지금처럼만 해주세요.`;
+  } else if (isMidRank && isStable) {
+    overall = `${name} 선생님, 매달 안정적인 모습을 꾸준히 유지해주고 계세요. 화려하진 않아도 흔들림 없이 자기 자리를 지켜주시는 모습은 팀에 정말 큰 힘이 됩니다.`;
+  } else if (isMidRank && isDeclining) {
+    overall = `${name} 선생님, ${firstMonth}에 비해 최근 조금 어려움이 있으셨나봐요. 그래도 여전히 중요한 역할을 해주고 계시고, 회복할 힘은 충분히 있으시다는 걸 믿어요. 천천히 다시 페이스 찾으시면 됩니다.`;
+  } else if (isLowRank && isGrowing) {
+    overall = `${name} 선생님, ${firstMonth}부터 ${totalGrowth}점이나 올라오신 거 정말 대단합니다. 비록 아직 순위는 아쉽지만 방향성은 확실히 좋아요. 이 흐름을 계속 이어가시면 분명 더 좋은 결과가 따라올 거예요.`;
+  } else if (isLowRank && isRecentlyImproved) {
+    overall = `${name} 선생님, 지난달 대비 ${monthChange}점 오르신 모습이 반갑네요. 변화를 만들어내고 계신다는 신호예요. 한 걸음씩 천천히, 그러나 확실하게 나아가고 계십니다.`;
+  } else if (isLowRank && isDeclining) {
+    overall = `${name} 선생님, 요즘 많이 힘드셨죠. 숫자만 봐서는 어렵게 보일 수 있지만, 모든 선생님이 한결같이 잘하는 시기만 있는 건 아니에요. 다시 일어설 기회는 항상 있으니, 너무 자책하지 마시고 천천히 회복해 가시면 됩니다.`;
+  } else if (isLowRank) {
+    overall = `${name} 선생님, 한 달간 정말 수고 많으셨어요. 점수로 다 표현되지 않는 노력들이 있다는 걸 잘 알고 있습니다. 다음 달에는 작은 변화부터 시도해보시면 좋을 것 같아요.`;
+  } else {
+    overall = `${name} 선생님, ${latestMonth} 한 달도 수고 많으셨습니다. 묵묵히 자기 일을 해주시는 모습이 늘 감사해요.`;
+  }
+
+  // ============ 2) 좋은 점 ============
+  const goodPoints = [];
+
+  // 항목별 1위인 것
+  const top1Items = ITEMS.filter(item => {
+    const ranks = rankInItem(data, latestMonth, item, allTeachers);
+    return ranks[name] === 1 && (latest[item] ?? 0) > 0;
+  });
+  top1Items.slice(0, 2).forEach(item => {
+    const phrases = ITEM_NICE[item] || [];
+    const phrase = phrases[Math.floor(Math.random() * phrases.length)] || `${item}에서 좋은 모습을 보여주고 계세요`;
+    goodPoints.push(`✨ **${item}**에서 전체 1위를 차지하셨어요. ${phrase}.`);
+  });
+
+  // 팀 평균 대비 강점 (top1과 중복 아닌 것)
+  const usedItems = new Set(top1Items);
+  ITEMS.forEach(item => {
+    if (usedItems.has(item) || goodPoints.length >= 3) return;
+    const teamValues = teamMembers.map(n => data[latestMonth]?.[n]?.[item] ?? 0);
+    const teamAvg = teamValues.reduce((a, b) => a + b, 0) / teamValues.length;
+    const myValue = latest[item] ?? 0;
+
+    if (ITEM_POLARITY[item] === 1 && myValue > teamAvg * 1.4 && myValue >= 3) {
+      const phrases = ITEM_NICE[item] || [];
+      const phrase = phrases[Math.floor(Math.random() * phrases.length)] || `${item}에서 좋은 모습을 보여주고 계세요`;
+      goodPoints.push(`💝 ${phrase}. 팀 평균(${teamAvg.toFixed(1)})보다 훨씬 높은 ${myValue}점이에요.`);
+      usedItems.add(item);
+    } else if (ITEM_POLARITY[item] === -1 && myValue === 0) {
+      // 지각/퇴원생 0점은 칭찬할 만함
+      const teamHas = teamValues.some(v => v < 0);
+      if (teamHas) {
+        const phrases = ITEM_NICE[item] || [];
+        const phrase = phrases[Math.floor(Math.random() * phrases.length)] || `${item}을 잘 관리하고 계세요`;
+        goodPoints.push(`💝 ${phrase}.`);
+        usedItems.add(item);
+      }
+    }
+  });
+
+  // 가장 향상된 항목
+  if (prevMonth && goodPoints.length < 3) {
+    const itemImprovements = ITEMS.map(item => {
+      const cur = latest[item] ?? 0;
+      const prv = data[prevMonth]?.[name]?.[item] ?? 0;
+      return { item, change: (cur - prv) * ITEM_POLARITY[item] };
+    }).filter(c => c.change > 2).sort((a, b) => b.change - a.change);
+
+    if (itemImprovements[0] && !usedItems.has(itemImprovements[0].item)) {
+      const it = itemImprovements[0].item;
+      goodPoints.push(`🌱 지난달 대비 **${it}**에서 눈에 띄게 성장하셨어요. 이 흐름을 계속 이어가시면 좋겠습니다.`);
+    }
+  }
+
+  // 1위 팀원이면 추가 메시지
+  if (teamRank === 1 && goodPoints.length < 3) {
+    goodPoints.push(`🏅 ${team} 1위로 팀을 이끌어주고 계세요. 팀의 든든한 기둥이 되어주셔서 감사합니다.`);
+  }
+
+  // 그래도 좋은점이 없으면 기본 격려
+  if (goodPoints.length === 0) {
+    goodPoints.push(`🌿 매달 자기 자리를 지켜주시는 그 자체로 큰 의미가 있어요. 꾸준함은 가장 큰 재능입니다.`);
+  }
+
+  // ============ 3) 보완할 점 ============
+  const improvements = [];
+
+  // 항목별 하위권 (음수 항목 우선)
+  const negativeItems = ITEMS.filter(item => ITEM_POLARITY[item] === -1);
+  negativeItems.forEach(item => {
+    if (improvements.length >= 2) return;
+    const myValue = latest[item] ?? 0;
+    if (myValue <= -3) {
+      improvements.push(`💭 ${ITEM_IMPROVE[item]}. (${latestMonth} ${myValue}점)`);
+    }
+  });
+
+  // 양수 항목이지만 0이거나 매우 낮은 것
+  ITEMS.forEach(item => {
+    if (improvements.length >= 2) return;
+    if (ITEM_POLARITY[item] === -1) return;
+    const myValue = latest[item] ?? 0;
+    const teamValues = teamMembers.map(n => data[latestMonth]?.[n]?.[item] ?? 0);
+    const teamMax = Math.max(...teamValues);
+
+    if (myValue === 0 && teamMax >= 3) {
+      improvements.push(`💭 ${ITEM_IMPROVE[item]}. 팀 내 다른 분들은 이미 좋은 성과를 내고 계신 부분이에요.`);
+    } else if (myValue > 0 && myValue < teamMax * 0.3 && teamMax >= 5) {
+      improvements.push(`💭 ${ITEM_IMPROVE[item]}.`);
+    }
+  });
+
+  // 전월 대비 크게 하락한 항목
+  if (prevMonth && improvements.length < 2) {
+    const declined = ITEMS.map(item => {
+      const cur = latest[item] ?? 0;
+      const prv = data[prevMonth]?.[name]?.[item] ?? 0;
+      return { item, change: (cur - prv) * ITEM_POLARITY[item] };
+    }).filter(c => c.change <= -5).sort((a, b) => a.change - b.change);
+
+    if (declined[0]) {
+      const it = declined[0].item;
+      improvements.push(`💭 지난달에 비해 **${it}** 부분이 조금 아쉬워졌네요. 무슨 일이 있으셨는지 한번 돌아보시면 좋을 것 같아요.`);
+    }
+  }
+
+  // 개선점이 없으면: 거의 완벽하다는 격려
+  if (improvements.length === 0) {
+    improvements.push(`🌟 특별히 보완이 필요한 부분이 눈에 띄지 않을 만큼 균형 잡힌 한 달을 보내셨어요. 이대로 쭉 가주세요.`);
+  }
+
+  // ============ 4) 마무리 격려 ============
+  let closing = '';
+  if (isTopRank) {
+    closing = `늘 최선을 다해주시는 모습이 팀 전체에 좋은 영향을 주고 있어요. 다음 달도 ${name} 선생님의 활약을 기대하고 응원합니다. 💪`;
+  } else if (isMidRank && isGrowing) {
+    closing = `지금처럼 한 걸음씩 나아가시면 분명 더 좋은 결과가 기다리고 있을 거예요. 응원합니다! 🌟`;
+  } else if (isLowRank && isGrowing) {
+    closing = `방향이 옳다면 속도는 중요하지 않아요. 지금 잘 가고 계세요. 다음 달도 함께 힘내봐요. 🌱`;
+  } else if (isLowRank && (isDeclining || isRecentlyDeclined)) {
+    closing = `힘든 시기지만 ${name} 선생님이 다시 일어설 수 있다는 걸 믿어요. 작은 한 걸음부터 시작해봐요. 곁에서 응원하고 있겠습니다. 💝`;
+  } else {
+    closing = `늘 수고가 많으세요. 다음 달도 ${name} 선생님의 모습 기대할게요. 💪`;
+  }
+
+  return { overall, goodPoints, improvements, closing };
+};
+
+// 월별 인사이트 생성
+const generateMonthInsights = (data, teams, allMonths, allTeachers) => {
+  const latestMonth = allMonths[allMonths.length - 1];
+  const prevMonth = allMonths[allMonths.length - 2];
+  if (!latestMonth) return null;
+
+  const insights = { mvp: null, mostImproved: null, mostDeclined: null, perfectAttend: [], topByItem: {} };
+
+  // MVP (총점 1위)
+  const ranking = allTeachers.map(name => ({
+    name,
+    score: data[latestMonth]?.[name]?.총점 ?? 0
+  })).sort((a, b) => b.score - a.score);
+  insights.mvp = ranking[0];
+
+  // 가장 향상/하락 (전월 대비)
+  if (prevMonth) {
+    const changes = allTeachers.map(name => ({
+      name,
+      change: (data[latestMonth]?.[name]?.총점 ?? 0) - (data[prevMonth]?.[name]?.총점 ?? 0)
+    }));
+    const sorted = [...changes].sort((a, b) => b.change - a.change);
+    insights.mostImproved = sorted[0];
+    insights.mostDeclined = sorted[sorted.length - 1];
+  }
+
+  // 항목별 1위
+  ITEMS.forEach(item => {
+    const list = allTeachers.map(n => ({ name: n, value: data[latestMonth]?.[n]?.[item] ?? 0 }));
+    list.sort((a, b) => b.value - a.value);
+    if (list[0].value !== 0) {
+      insights.topByItem[item] = list[0];
+    }
+  });
+
+  // 지각 없는 강사
+  insights.perfectAttend = allTeachers.filter(n => (data[latestMonth]?.[n]?.지각 ?? 0) === 0);
+
+  return insights;
+};
+
+// 누적 통계
+const calcCumulative = (data, name, allMonths) => {
+  const result = {};
+  ITEMS.forEach(item => {
+    result[item] = allMonths.reduce((acc, m) => acc + ((data[m]?.[name]?.[item]) ?? 0), 0);
+  });
+  result.총점 = allMonths.reduce((acc, m) => acc + ((data[m]?.[name]?.총점) ?? 0), 0);
+  return result;
+};
+
+// ============ URL 쿼리 파싱 (공유 링크) ============
+const getShareParams = () => {
+  if (typeof window === 'undefined') return {};
+  const p = new URLSearchParams(window.location.search);
+  return { teacher: p.get('teacher'), team: p.get('team') };
+};
+
+// ============ 메인 컴포넌트 ============
+function Dashboard() {
+  const [data, setData] = useState({});
+  const [teams] = useState(DEFAULT_TEAMS);
+  const [activeTab, setActiveTab] = useState('dashboard');
+  const [selectedTeacher, setSelectedTeacher] = useState(null);
+  const [selectedTeam, setSelectedTeam] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [uploadState, setUploadState] = useState({ status: 'idle' });
+  const [toast, setToast] = useState(null);
+  const fileInputRef = useRef(null);
+  const importInputRef = useRef(null);
+  const [shareMode, setShareMode] = useState(null); // {kind: 'teacher'|'team', name: string}
+  const [customFeedbacks, setCustomFeedbacks] = useState({}); // {"이름_월": {custom: {...}|null, memo: "..."}}
+
+  // 초기 로드
+  useEffect(() => {
+    (async () => {
+      try {
+        const stored = await window.storage.get('dashboard_data');
+        if (stored && stored.value) {
+          setData(JSON.parse(stored.value));
+        } else {
+          setData(SEED_DATA);
+          try { await window.storage.set('dashboard_data', JSON.stringify(SEED_DATA)); } catch (e) {}
+        }
+        // 커스텀 피드백 로드
+        const storedFb = await window.storage.get('custom_feedbacks');
+        if (storedFb && storedFb.value) {
+          setCustomFeedbacks(JSON.parse(storedFb.value));
+        }
+      } catch (err) {
+        setData(SEED_DATA);
+        try { await window.storage.set('dashboard_data', JSON.stringify(SEED_DATA)); } catch (e) {}
+      } finally {
+        setLoading(false);
+      }
+
+      // 공유 링크 처리
+      const { teacher, team } = getShareParams();
+      if (teacher) {
+        setShareMode({ kind: 'teacher', name: teacher });
+        setSelectedTeacher(teacher);
+        setActiveTab('teacher');
+      } else if (team) {
+        setShareMode({ kind: 'team', name: team });
+        setSelectedTeam(team);
+        setActiveTab('team');
+      }
+    })();
+  }, []);
+
+  const saveData = async (newData) => {
+    setData(newData);
+    try { await window.storage.set('dashboard_data', JSON.stringify(newData)); } catch (err) {}
+  };
+
+  // 커스텀 피드백 저장/삭제
+  const saveCustomFeedback = async (teacher, month, payload) => {
+    const key = `${teacher}_${month}`;
+    const newFb = { ...customFeedbacks };
+    if (payload === null) {
+      delete newFb[key];
+    } else {
+      newFb[key] = payload;
+    }
+    setCustomFeedbacks(newFb);
+    try { await window.storage.set('custom_feedbacks', JSON.stringify(newFb)); } catch (err) {}
+  };
+
+  const showToast = (msg, type = 'success') => {
+    setToast({ msg, type });
+    setTimeout(() => setToast(null), 2800);
+  };
+
+  const handleFileUpload = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    e.target.value = '';
+    try {
+      const parsed = await parseExcelFile(file);
+      const teacherCount = Object.keys(parsed.teachers).length;
+      if (teacherCount === 0) {
+        showToast('엑셀에서 강사 데이터를 찾을 수 없습니다', 'error');
+        return;
+      }
+      setUploadState({
+        status: 'confirm',
+        pendingMonth: parsed.month,
+        pendingData: parsed.teachers,
+        sheetName: parsed.sheetName,
+        teacherCount,
+        filename: file.name
+      });
+    } catch (err) {
+      showToast('엑셀 파일을 읽을 수 없습니다', 'error');
+    }
+  };
+
+  const confirmUpload = (finalMonth) => {
+    if (!finalMonth || !uploadState.pendingData) return;
+    const newData = { ...data, [finalMonth]: uploadState.pendingData };
+    saveData(newData);
+    setUploadState({ status: 'idle' });
+    showToast(`${finalMonth} 데이터가 저장되었습니다`);
+  };
+
+  const deleteMonth = (month) => {
+    if (!confirm(`${month} 데이터를 삭제하시겠습니까?`)) return;
+    const newData = { ...data };
+    delete newData[month];
+    saveData(newData);
+    showToast(`${month} 데이터가 삭제되었습니다`);
+  };
+
+  const exportJSON = () => {
+    const json = JSON.stringify({ data, teams, customFeedbacks, exportedAt: new Date().toISOString() }, null, 2);
+    const blob = new Blob([json], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `dashboard_backup_${new Date().toISOString().slice(0, 10)}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+    showToast('백업 파일이 다운로드되었습니다');
+  };
+
+  const importJSON = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    e.target.value = '';
+    try {
+      const text = await file.text();
+      const parsed = JSON.parse(text);
+      if (parsed.data) {
+        if (!confirm('기존 데이터를 백업 파일의 내용으로 덮어쓰시겠습니까?\n(평가 메모도 함께 복원됩니다)')) return;
+        await saveData(parsed.data);
+        if (parsed.customFeedbacks) {
+          setCustomFeedbacks(parsed.customFeedbacks);
+          try { await window.storage.set('custom_feedbacks', JSON.stringify(parsed.customFeedbacks)); } catch (e) {}
+        }
+        showToast('백업 데이터가 복원되었습니다');
+      } else {
+        showToast('올바른 백업 파일이 아닙니다', 'error');
+      }
+    } catch (err) {
+      showToast('백업 파일을 읽을 수 없습니다', 'error');
+    }
+  };
+
+  const resetAllData = async () => {
+    if (!confirm('모든 데이터를 삭제하고 초기 시드(1~4월)로 되돌리시겠습니까?\n(작성하신 평가 메모도 모두 삭제됩니다)')) return;
+    await saveData(SEED_DATA);
+    setCustomFeedbacks({});
+    try { await window.storage.set('custom_feedbacks', JSON.stringify({})); } catch (e) {}
+    showToast('데이터가 초기화되었습니다');
+  };
+
+  const copyShareLink = (kind, name) => {
+    const baseURL = (typeof window !== 'undefined') ? window.location.origin + window.location.pathname : '';
+    const url = `${baseURL}?${kind}=${encodeURIComponent(name)}`;
+    if (navigator?.clipboard?.writeText) {
+      navigator.clipboard.writeText(url).then(() => {
+        showToast('링크가 복사되었습니다');
+      }).catch(() => {
+        prompt('아래 링크를 복사하세요:', url);
+      });
+    } else {
+      prompt('아래 링크를 복사하세요:', url);
+    }
+  };
+
+  const allMonths = useMemo(() => sortMonths(Object.keys(data)), [data]);
+  const latestMonth = allMonths[allMonths.length - 1];
+  const firstMonth = allMonths[0];
+
+  const allTeachers = useMemo(() => {
+    const set = new Set();
+    Object.values(data).forEach(monthData => Object.keys(monthData).forEach(name => set.add(name)));
+    return Array.from(set);
+  }, [data]);
+
+  const teamMonthlyTotal = useMemo(() => {
+    const result = {};
+    Object.entries(teams).forEach(([tname, members]) => {
+      result[tname] = {};
+      allMonths.forEach(month => {
+        const sum = members.reduce((acc, name) => acc + ((data[month]?.[name]?.총점) ?? 0), 0);
+        result[tname][month] = sum;
+      });
+    });
+    return result;
+  }, [data, teams, allMonths]);
+
+  const teacherMonthlyTotal = useMemo(() => {
+    const result = {};
+    allTeachers.forEach(name => {
+      result[name] = {};
+      allMonths.forEach(month => {
+        const v = data[month]?.[name]?.총점;
+        result[name][month] = typeof v === 'number' ? v : null;
+      });
+    });
+    return result;
+  }, [data, allTeachers, allMonths]);
+
+  const insights = useMemo(() => generateMonthInsights(data, teams, allMonths, allTeachers), [data, teams, allMonths, allTeachers]);
+
+  if (loading) {
+    return <div className="flex items-center justify-center min-h-[400px] text-slate-500">데이터 불러오는 중...</div>;
+  }
+
+  // 공유 모드 (특정 선생님/팀만 보기)
+  if (shareMode) {
+    return (
+      <ShareView
+        shareMode={shareMode}
+        data={data}
+        teams={teams}
+        allMonths={allMonths}
+        allTeachers={allTeachers}
+        teacherMonthlyTotal={teacherMonthlyTotal}
+        teamMonthlyTotal={teamMonthlyTotal}
+        customFeedbacks={customFeedbacks}
+      />
+    );
+  }
+
+  return (
+    <div className="min-h-screen bg-slate-50" style={{ fontFamily: "'Noto Sans KR', -apple-system, BlinkMacSystemFont, sans-serif" }}>
+      <header className="bg-white border-b border-slate-200 sticky top-0 z-20">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 py-4 flex items-center justify-between flex-wrap gap-3">
+          <div>
+            <h1 className="text-xl sm:text-2xl font-bold text-slate-900">📊 2026 선생님 평가 대시보드</h1>
+            <p className="text-xs sm:text-sm text-slate-500 mt-0.5">
+              {allMonths.length > 0 ? `${firstMonth} ~ ${latestMonth} 누적 · 선생님 ${allTeachers.length}명 · ${Object.keys(teams).length}개 팀` : '데이터를 업로드해주세요'}
+            </p>
+          </div>
+          <div className="flex gap-2">
+            <button onClick={() => fileInputRef.current?.click()}
+              className="inline-flex items-center gap-1.5 px-3 sm:px-4 py-2 bg-slate-900 text-white text-sm font-medium rounded-lg hover:bg-slate-800 active:scale-95 transition">
+              <FileUp size={16} /> 엑셀 업로드
+            </button>
+            <input ref={fileInputRef} type="file" accept=".xlsx,.xls" onChange={handleFileUpload} className="hidden" />
+          </div>
+        </div>
+        <nav className="max-w-7xl mx-auto px-4 sm:px-6 flex gap-1 -mb-px overflow-x-auto">
+          {[
+            { id: 'dashboard', label: '📊 전체 대시보드' },
+            { id: 'teacher', label: '👤 선생님별' },
+            { id: 'team', label: '🏅 팀별' },
+            { id: 'rankings', label: '🏆 항목별 순위' },
+            { id: 'manage', label: '⚙️ 데이터 관리' }
+          ].map(tab => (
+            <button key={tab.id} onClick={() => setActiveTab(tab.id)}
+              className={`px-3 sm:px-4 py-2.5 text-sm font-medium whitespace-nowrap border-b-2 transition ${
+                activeTab === tab.id ? 'border-slate-900 text-slate-900' : 'border-transparent text-slate-500 hover:text-slate-700'
+              }`}>
+              {tab.label}
+            </button>
+          ))}
+        </nav>
+      </header>
+
+      {uploadState.status === 'confirm' && (
+        <UploadConfirmModal state={uploadState} existingMonths={allMonths} onConfirm={confirmUpload} onCancel={() => setUploadState({ status: 'idle' })} />
+      )}
+      {toast && (
+        <div className={`fixed bottom-6 right-6 z-50 px-4 py-3 rounded-lg shadow-lg text-white text-sm flex items-center gap-2 ${toast.type === 'error' ? 'bg-red-600' : 'bg-emerald-600'}`}>
+          {toast.type === 'error' ? <AlertCircle size={16} /> : <Check size={16} />}
+          {toast.msg}
+        </div>
+      )}
+
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 py-6 sm:py-8">
+        {allMonths.length === 0 && activeTab !== 'manage' ? (
+          <EmptyState onUpload={() => fileInputRef.current?.click()} />
+        ) : (
+          <>
+            {activeTab === 'dashboard' && (
+              <DashboardView data={data} teams={teams} allMonths={allMonths} allTeachers={allTeachers}
+                teamMonthlyTotal={teamMonthlyTotal} teacherMonthlyTotal={teacherMonthlyTotal}
+                latestMonth={latestMonth} firstMonth={firstMonth} insights={insights}
+                onSelectTeacher={(n) => { setSelectedTeacher(n); setActiveTab('teacher'); }}
+                onSelectTeam={(t) => { setSelectedTeam(t); setActiveTab('team'); }} />
+            )}
+            {activeTab === 'teacher' && (
+              <TeacherView data={data} teams={teams} allMonths={allMonths} allTeachers={allTeachers}
+                teacherMonthlyTotal={teacherMonthlyTotal}
+                selectedTeacher={selectedTeacher} setSelectedTeacher={setSelectedTeacher}
+                onCopyLink={(n) => copyShareLink('teacher', n)}
+                customFeedbacks={customFeedbacks} onSaveCustomFeedback={saveCustomFeedback} />
+            )}
+            {activeTab === 'team' && (
+              <TeamView data={data} teams={teams} allMonths={allMonths} teamMonthlyTotal={teamMonthlyTotal}
+                allTeachers={allTeachers}
+                selectedTeam={selectedTeam} setSelectedTeam={setSelectedTeam}
+                onCopyLink={(t) => copyShareLink('team', t)} />
+            )}
+            {activeTab === 'rankings' && (
+              <RankingsView data={data} teams={teams} allMonths={allMonths} allTeachers={allTeachers} latestMonth={latestMonth} firstMonth={firstMonth} />
+            )}
+            {activeTab === 'manage' && (
+              <ManageView data={data} allMonths={allMonths}
+                onDeleteMonth={deleteMonth} onExport={exportJSON}
+                onImport={() => importInputRef.current?.click()} onReset={resetAllData}
+                onUpload={() => fileInputRef.current?.click()} />
+            )}
+            <input ref={importInputRef} type="file" accept=".json" onChange={importJSON} className="hidden" />
+          </>
+        )}
+      </main>
+    </div>
+  );
+}
+
+// ============ 빈 상태 ============
+function EmptyState({ onUpload }) {
+  return (
+    <div className="bg-white rounded-2xl border border-slate-200 p-12 text-center">
+      <Upload className="mx-auto text-slate-300" size={48} />
+      <h2 className="mt-4 text-lg font-semibold text-slate-900">데이터가 없습니다</h2>
+      <p className="mt-2 text-sm text-slate-500">엑셀 파일을 업로드해서 시작하세요</p>
+      <button onClick={onUpload} className="mt-6 px-5 py-2.5 bg-slate-900 text-white text-sm font-medium rounded-lg hover:bg-slate-800">
+        엑셀 업로드
+      </button>
+    </div>
+  );
+}
+
+// ============ 업로드 확인 모달 ============
+function UploadConfirmModal({ state, existingMonths, onConfirm, onCancel }) {
+  const [selectedMonth, setSelectedMonth] = useState(state.pendingMonth || '');
+  const isOverwrite = existingMonths.includes(selectedMonth);
+  return (
+    <div className="fixed inset-0 z-30 bg-black/40 flex items-center justify-center p-4">
+      <div className="bg-white rounded-2xl max-w-md w-full p-6">
+        <h2 className="text-lg font-bold text-slate-900">업로드 확인</h2>
+        <p className="text-sm text-slate-500 mt-1">{state.filename}</p>
+        <div className="mt-4 p-3 bg-slate-50 rounded-lg text-sm space-y-1">
+          <div><span className="text-slate-500">시트:</span> <span className="font-medium">{state.sheetName}</span></div>
+          <div><span className="text-slate-500">강사 수:</span> <span className="font-medium">{state.teacherCount}명</span></div>
+          <div><span className="text-slate-500">감지된 강사:</span> <span className="text-xs text-slate-700">{Object.keys(state.pendingData).join(', ')}</span></div>
+        </div>
+        <div className="mt-4">
+          <label className="text-sm font-medium text-slate-700">어느 월의 데이터인가요?</label>
+          <select value={selectedMonth} onChange={(e) => setSelectedMonth(e.target.value)}
+            className="mt-2 w-full px-3 py-2 border border-slate-300 rounded-lg text-sm">
+            <option value="">선택해주세요</option>
+            {MONTH_ORDER.map(m => (
+              <option key={m} value={m}>{m}{existingMonths.includes(m) ? ' (기존 덮어쓰기)' : ''}</option>
+            ))}
+          </select>
+          {isOverwrite && (
+            <p className="mt-2 text-xs text-amber-600 flex items-center gap-1">
+              <AlertCircle size={12} /> 기존 {selectedMonth} 데이터가 덮어쓰여집니다
+            </p>
+          )}
+        </div>
+        <div className="mt-6 flex gap-2 justify-end">
+          <button onClick={onCancel} className="px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100 rounded-lg">취소</button>
+          <button onClick={() => onConfirm(selectedMonth)} disabled={!selectedMonth}
+            className="px-4 py-2 text-sm font-medium text-white bg-slate-900 rounded-lg hover:bg-slate-800 disabled:bg-slate-300">저장</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ============ 대시보드 뷰 ============
+function DashboardView({ data, teams, allMonths, allTeachers, teamMonthlyTotal, teacherMonthlyTotal, latestMonth, firstMonth, insights, onSelectTeacher, onSelectTeam }) {
+  const latestRanking = useMemo(() => {
+    if (!latestMonth) return [];
+    return allTeachers
+      .map(name => ({ name, score: data[latestMonth]?.[name]?.총점 ?? 0, team: getTeamOf(name, teams) }))
+      .sort((a, b) => b.score - a.score);
+  }, [data, latestMonth, allTeachers, teams]);
+
+  const topScorer = latestRanking[0];
+  const teamChange = useMemo(() => {
+    const result = {};
+    Object.entries(teams).forEach(([tname]) => {
+      const first = teamMonthlyTotal[tname]?.[firstMonth] ?? 0;
+      const last = teamMonthlyTotal[tname]?.[latestMonth] ?? 0;
+      result[tname] = last - first;
+    });
+    return result;
+  }, [teamMonthlyTotal, teams, firstMonth, latestMonth]);
+
+  const totalChange = Object.values(teamChange).reduce((a, b) => a + b, 0);
+
+  return (
+    <div className="space-y-6">
+      {/* 상단 요약 카드 */}
+      <div className="grid grid-cols-2 lg:grid-cols-5 gap-3 sm:gap-4">
+        <SummaryCard icon={<Users size={18} />} label="전체 선생님" value={allTeachers.length} sub={`${Object.keys(teams).length}개 팀 운영중`} color="slate" />
+        <SummaryCard icon={<Award size={18} />} label={`전체 1위 (${latestMonth})`} value={topScorer?.score ?? '-'} sub={topScorer ? `🥇 ${topScorer.name} 선생님` : '-'} color="amber" />
+        <SummaryCard icon={<Sparkles size={18} />} label="양 팀 변화 합산" value={`${totalChange >= 0 ? '+' : ''}${totalChange}`} sub={`↑ ${firstMonth}→${latestMonth}`} color="purple" />
+        {Object.entries(teams).map(([tname]) => {
+          const change = teamChange[tname];
+          return (
+            <SummaryCard key={tname} icon={change >= 0 ? <TrendingUp size={18} /> : <TrendingDown size={18} />}
+              label={`${tname} ${latestMonth}`} value={teamMonthlyTotal[tname]?.[latestMonth] ?? 0}
+              sub={`${change >= 0 ? '↑' : '↓'} ${change >= 0 ? '+' : ''}${change} (${firstMonth} 대비)`}
+              color={tname === '박유경팀' ? 'blue' : 'violet'} />
+          );
+        })}
+      </div>
+
+      {/* 월별 인사이트 */}
+      {insights && (
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <InsightCard icon={<Trophy size={20} className="text-amber-500" />} title={`${latestMonth} MVP`}
+            mainText={insights.mvp?.name} subText={`${insights.mvp?.score}점`} color="amber" />
+          {insights.mostImproved && (
+            <InsightCard icon={<TrendingUp size={20} className="text-emerald-500" />} title="가장 향상된 선생님"
+              mainText={insights.mostImproved.name} subText={`전월 대비 ${insights.mostImproved.change >= 0 ? '+' : ''}${insights.mostImproved.change}점`} color="emerald" />
+          )}
+          {insights.mostDeclined && (
+            <InsightCard icon={<AlertTriangle size={20} className="text-rose-500" />} title="회복이 필요한 선생님"
+              mainText={insights.mostDeclined.name} subText={`전월 대비 ${insights.mostDeclined.change}점`} color="rose" />
+          )}
+        </div>
+      )}
+
+      {/* 팀별 추이 차트 */}
+      <div className="bg-white rounded-2xl border border-slate-200 p-4 sm:p-6">
+        <h2 className="text-base font-bold text-slate-900 mb-4">팀별 월별 총점 추이</h2>
+        <div className="h-64 sm:h-80">
+          <ResponsiveContainer width="100%" height="100%">
+            <LineChart data={allMonths.map(m => ({
+              month: m,
+              ...Object.fromEntries(Object.keys(teams).map(tname => [tname, teamMonthlyTotal[tname]?.[m] ?? 0]))
+            }))}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+              <XAxis dataKey="month" tick={{ fontSize: 12 }} stroke="#64748b" />
+              <YAxis tick={{ fontSize: 12 }} stroke="#64748b" />
+              <Tooltip contentStyle={{ borderRadius: 8, border: '1px solid #e2e8f0', fontSize: 12 }} />
+              <Legend wrapperStyle={{ fontSize: 12 }} />
+              {Object.keys(teams).map(tname => (
+                <Line key={tname} type="monotone" dataKey={tname} stroke={teamColor(tname).primary} strokeWidth={2.5} dot={{ r: 4 }} activeDot={{ r: 6 }} />
+              ))}
+            </LineChart>
+          </ResponsiveContainer>
+        </div>
+      </div>
+
+      {/* 팀별 카드 */}
+      <div className="grid lg:grid-cols-2 gap-4">
+        {Object.entries(teams).map(([tname, members]) => (
+          <TeamSummaryCard key={tname} tname={tname} members={members} data={data}
+            allMonths={allMonths} teamMonthlyTotal={teamMonthlyTotal[tname]}
+            onClickTeam={() => onSelectTeam(tname)}
+            teamRank={Object.entries(teamMonthlyTotal).sort((a, b) => (b[1][latestMonth] ?? 0) - (a[1][latestMonth] ?? 0)).findIndex(([t]) => t === tname) + 1} />
+        ))}
+      </div>
+
+      {/* 전체 순위표 */}
+      <div className="bg-white rounded-2xl border border-slate-200 p-4 sm:p-6">
+        <h2 className="text-base font-bold text-slate-900 mb-1">전체 선생님 순위</h2>
+        <p className="text-xs text-slate-500 mb-4">{latestMonth} 기준 · 클릭하면 상세 조회</p>
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-slate-200 text-slate-500 text-xs">
+                <th className="text-left py-2 pl-1">순위</th>
+                <th className="text-left py-2">이름</th>
+                <th className="text-left py-2">팀</th>
+                <th className="text-center py-2">팀내</th>
+                {allMonths.map(m => <th key={m} className="text-right py-2 px-2">{m}</th>)}
+                <th className="text-right py-2 pr-1">변화</th>
+              </tr>
+            </thead>
+            <tbody>
+              {latestRanking.map((row, idx) => {
+                const first = teacherMonthlyTotal[row.name]?.[firstMonth];
+                const last = teacherMonthlyTotal[row.name]?.[latestMonth];
+                const change = (first !== null && last !== null) ? last - first : null;
+                const colors = teamColor(row.team);
+                const teamMembers = teams[row.team] || [];
+                const teamInternalRank = teamMembers
+                  .map(n => ({ name: n, score: data[latestMonth]?.[n]?.총점 ?? 0 }))
+                  .sort((a, b) => b.score - a.score)
+                  .findIndex(t => t.name === row.name) + 1;
+                return (
+                  <tr key={row.name} onClick={() => onSelectTeacher(row.name)}
+                    className="border-b border-slate-100 hover:bg-slate-50 cursor-pointer">
+                    <td className="py-2.5 pl-1">
+                      <span className="font-semibold">{idx < 3 ? rankEmoji(idx + 1) : `${idx + 1}위`}</span>
+                    </td>
+                    <td className="py-2.5 font-medium">{row.name}</td>
+                    <td className="py-2.5">
+                      <span className="inline-block px-2 py-0.5 rounded text-xs font-medium"
+                        style={{ backgroundColor: colors.light, color: colors.accent }}>
+                        {row.team}
+                      </span>
+                    </td>
+                    <td className="py-2.5 text-center text-xs text-slate-600">{teamInternalRank}위</td>
+                    {allMonths.map(m => (
+                      <td key={m} className="text-right py-2.5 px-2 text-slate-600">
+                        {teacherMonthlyTotal[row.name]?.[m] ?? '-'}
+                      </td>
+                    ))}
+                    <td className={`text-right py-2.5 pr-1 font-semibold ${change > 0 ? 'text-emerald-600' : change < 0 ? 'text-red-500' : 'text-slate-400'}`}>
+                      {change === null ? '-' : `${change > 0 ? '+' : ''}${change}`}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* 항목별 1위 그리드 */}
+      {insights && (
+        <div className="bg-white rounded-2xl border border-slate-200 p-4 sm:p-6">
+          <h2 className="text-base font-bold text-slate-900 mb-1">{latestMonth} 항목별 1위</h2>
+          <p className="text-xs text-slate-500 mb-4">각 평가 항목에서 가장 높은 점수를 받은 선생님</p>
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+            {ITEMS.map(item => {
+              const top = insights.topByItem[item];
+              return (
+                <div key={item} className="p-3 bg-slate-50 rounded-lg">
+                  <div className="text-xs text-slate-500">{item}</div>
+                  <div className="font-bold text-slate-900 mt-1">{top?.name ?? '-'}</div>
+                  <div className="text-sm font-medium" style={{ color: top ? teamColor(getTeamOf(top.name, teams)).primary : '#94a3b8' }}>
+                    {top ? `${top.value}점` : '-'}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ============ 요약 카드 ============
+function SummaryCard({ icon, label, value, sub, color }) {
+  const colors = {
+    slate: { bg: 'bg-slate-50', text: 'text-slate-600', accent: 'text-slate-900' },
+    amber: { bg: 'bg-amber-50', text: 'text-amber-700', accent: 'text-amber-900' },
+    blue: { bg: 'bg-blue-50', text: 'text-blue-700', accent: 'text-blue-900' },
+    violet: { bg: 'bg-violet-50', text: 'text-violet-700', accent: 'text-violet-900' },
+    purple: { bg: 'bg-purple-50', text: 'text-purple-700', accent: 'text-purple-900' },
+  }[color] || { bg: 'bg-slate-50', text: 'text-slate-600', accent: 'text-slate-900' };
+  return (
+    <div className={`${colors.bg} rounded-2xl p-4 sm:p-5`}>
+      <div className={`flex items-center gap-1.5 ${colors.text} text-xs font-medium`}>{icon}{label}</div>
+      <div className={`mt-2 text-2xl sm:text-3xl font-bold ${colors.accent}`}>{value}</div>
+      <div className={`mt-1 text-xs ${colors.text}`}>{sub}</div>
+    </div>
+  );
+}
+
+function InsightCard({ icon, title, mainText, subText, color }) {
+  const bg = { amber: 'bg-amber-50 border-amber-200', emerald: 'bg-emerald-50 border-emerald-200', rose: 'bg-rose-50 border-rose-200' }[color] || 'bg-slate-50';
+  return (
+    <div className={`${bg} border rounded-2xl p-4 sm:p-5`}>
+      <div className="flex items-center gap-2">{icon}<span className="text-xs font-medium text-slate-700">{title}</span></div>
+      <div className="mt-2 text-2xl font-bold text-slate-900">{mainText}</div>
+      <div className="text-sm text-slate-600">{subText}</div>
+    </div>
+  );
+}
+
+// ============ 팀별 요약 카드 ============
+function TeamSummaryCard({ tname, members, data, allMonths, teamMonthlyTotal, onClickTeam, teamRank }) {
+  const colors = teamColor(tname);
+  const latestMonth = allMonths[allMonths.length - 1];
+  const firstMonth = allMonths[0];
+  const change = (teamMonthlyTotal[latestMonth] ?? 0) - (teamMonthlyTotal[firstMonth] ?? 0);
+  const memberScores = members.map(name => ({ name, score: data[latestMonth]?.[name]?.총점 ?? 0 })).sort((a, b) => b.score - a.score);
+  const top = memberScores[0], bot = memberScores[memberScores.length - 1];
+
+  return (
+    <div onClick={onClickTeam} className="bg-white rounded-2xl border border-slate-200 p-4 sm:p-5 overflow-hidden hover:shadow-md transition cursor-pointer">
+      <div className="flex items-center justify-between">
+        <h3 className="text-base font-bold flex items-center gap-2">
+          <span>{colors.emoji} {tname}</span>
+          <span className="text-xs text-amber-600 font-medium">{rankEmoji(teamRank)}</span>
+        </h3>
+        <span className={`text-xs px-2 py-1 rounded font-medium ${change >= 0 ? 'bg-emerald-50 text-emerald-700' : 'bg-red-50 text-red-700'}`}>
+          {change >= 0 ? '+' : ''}{change}점
+        </span>
+      </div>
+      <div className="mt-1 text-xs text-slate-500">월별 팀 총점</div>
+      <div className="mt-3 grid grid-cols-4 gap-1 sm:gap-2">
+        {allMonths.map(m => (
+          <div key={m} className="text-center py-2 rounded-lg" style={{ backgroundColor: m === latestMonth ? colors.light : '#f8fafc' }}>
+            <div className="text-xs text-slate-500">{m}</div>
+            <div className="text-base sm:text-lg font-bold mt-0.5" style={{ color: m === latestMonth ? colors.accent : '#475569' }}>
+              {teamMonthlyTotal[m] ?? 0}
+            </div>
+          </div>
+        ))}
+      </div>
+      <div className="mt-3 text-sm font-medium" style={{ color: colors.accent }}>
+        {change >= 0 ? '⬆' : '⬇'} {change >= 0 ? '+' : ''}{change}점 {change >= 0 ? '성장' : '하락'}
+      </div>
+      <div className="mt-3 pt-3 border-t border-slate-100 text-xs text-slate-500">
+        팀 1위: <span className="font-medium text-slate-700">{top?.name} ({top?.score}점)</span> · 팀 최저: <span className="font-medium text-slate-700">{bot?.name} ({bot?.score}점)</span>
+      </div>
+    </div>
+  );
+}
+
+// ============ 선생님별 뷰 ============
+function TeacherView({ data, teams, allMonths, allTeachers, teacherMonthlyTotal, selectedTeacher, setSelectedTeacher, onCopyLink, customFeedbacks = {}, onSaveCustomFeedback = () => {}, readOnly = false, isShared = false }) {
+  const teacher = selectedTeacher || allTeachers[0];
+  const team = getTeamOf(teacher, teams);
+  const colors = teamColor(team);
+  const latestMonth = allMonths[allMonths.length - 1];
+  const firstMonth = allMonths[0];
+
+  const chartData = allMonths.map(m => ({ month: m, 총점: teacherMonthlyTotal[teacher]?.[m] ?? null }));
+  const feedback = useMemo(() => generateFeedback(teacher, data, teams, allMonths, allTeachers), [teacher, data, teams, allMonths, allTeachers]);
+  const narrative = useMemo(() => generateNarrativeFeedback(teacher, data, teams, allMonths, allTeachers), [teacher, data, teams, allMonths, allTeachers]);
+  const cumulative = useMemo(() => calcCumulative(data, teacher, allMonths), [data, teacher, allMonths]);
+
+  // 전체 순위
+  const overallRank = useMemo(() => {
+    const list = allTeachers.map(n => ({ name: n, score: data[latestMonth]?.[n]?.총점 ?? 0 })).sort((a, b) => b.score - a.score);
+    return list.findIndex(t => t.name === teacher) + 1;
+  }, [data, latestMonth, allTeachers, teacher]);
+
+  // 팀 내 순위
+  const teamMembers = teams[team] || [];
+  const teamRank = useMemo(() => {
+    const list = teamMembers.map(n => ({ name: n, score: data[latestMonth]?.[n]?.총점 ?? 0 })).sort((a, b) => b.score - a.score);
+    return list.findIndex(t => t.name === teacher) + 1;
+  }, [data, latestMonth, teamMembers, teacher]);
+
+  // 팀 평균과 비교 (레이더)
+  const teamAvgByItem = useMemo(() => {
+    const avg = {};
+    ITEMS.forEach(item => {
+      const vals = teamMembers.map(n => data[latestMonth]?.[n]?.[item] ?? 0);
+      avg[item] = vals.reduce((a, b) => a + b, 0) / vals.length;
+    });
+    return avg;
+  }, [data, latestMonth, teamMembers]);
+
+  const radarData = ITEMS.map(item => {
+    const me = data[latestMonth]?.[teacher]?.[item] ?? 0;
+    const avg = teamAvgByItem[item];
+    // 음수 항목은 절댓값으로 변환 (시각적 일관성)
+    return {
+      item,
+      [teacher]: ITEM_POLARITY[item] === -1 ? Math.max(0, 20 + me) : me,
+      '팀 평균': ITEM_POLARITY[item] === -1 ? Math.max(0, 20 + avg) : avg
+    };
+  });
+
+  // 항목별 추이 차트
+  const itemTrend = allMonths.map(m => {
+    const d = data[m]?.[teacher] || {};
+    return { month: m, ...Object.fromEntries(ITEMS.map(it => [it, d[it] ?? 0])) };
+  });
+
+  return (
+    <div className="space-y-6">
+      {/* 선생님 선택 (공유 모드에서는 숨김) */}
+      {!isShared && (
+        <div className="bg-white rounded-2xl border border-slate-200 p-4 sm:p-5">
+          <div className="flex items-center justify-between flex-wrap gap-3">
+            <div className="text-sm font-medium text-slate-700">선생님 선택</div>
+            <button onClick={() => onCopyLink(teacher)}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-slate-700 border border-slate-300 rounded-lg hover:bg-slate-50">
+              <Link2 size={14} /> {teacher} 링크 복사
+            </button>
+          </div>
+          <div className="mt-3 flex flex-wrap gap-2">
+            {allTeachers.map(name => {
+              const t = getTeamOf(name, teams);
+              const c = teamColor(t);
+              return (
+                <button key={name} onClick={() => setSelectedTeacher(name)}
+                  className="px-3 py-1.5 rounded-lg text-sm font-medium transition border"
+                  style={{
+                    backgroundColor: name === teacher ? c.primary : 'white',
+                    borderColor: name === teacher ? c.primary : c.light,
+                    color: name === teacher ? 'white' : c.accent
+                  }}>
+                  {name}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* 헤더 */}
+      <div className="rounded-2xl p-5 sm:p-7" style={{ backgroundColor: colors.bg, border: `1px solid ${colors.light}` }}>
+        <div className="flex items-center justify-between flex-wrap gap-4">
+          <div>
+            <div className="text-xs font-medium flex items-center gap-2" style={{ color: colors.accent }}>
+              {colors.emoji} {team}
+              <span className="px-2 py-0.5 bg-white rounded-full text-[10px] font-bold">팀내 {rankEmoji(teamRank)}</span>
+              <span className="px-2 py-0.5 bg-white rounded-full text-[10px] font-bold">전체 {rankEmoji(overallRank)}</span>
+            </div>
+            <h2 className="text-2xl sm:text-3xl font-bold mt-2 text-slate-900">{teacher} 선생님</h2>
+            {feedback.summary && (
+              <p className="text-sm mt-2" style={{ color: colors.accent }}>📌 {feedback.summary}</p>
+            )}
+          </div>
+          <div className="text-right">
+            <div className="text-xs text-slate-500">{latestMonth} 총점</div>
+            <div className="text-4xl font-bold" style={{ color: colors.primary }}>
+              {teacherMonthlyTotal[teacher]?.[latestMonth] ?? '-'}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* 종합 평가 (따뜻한 톤) */}
+      <NarrativeFeedbackCard
+        narrative={narrative}
+        colors={colors}
+        teacher={teacher}
+        latestMonth={latestMonth}
+        customFeedback={customFeedbacks[`${teacher}_${latestMonth}`]}
+        onSave={(payload) => onSaveCustomFeedback(teacher, latestMonth, payload)}
+        readOnly={readOnly}
+      />
+
+      {/* 자동 피드백 (수치 기반) */}
+      <FeedbackCard feedback={feedback} colors={colors} teacher={teacher} />
+
+      {/* 차트 그리드 */}
+      <div className="grid lg:grid-cols-2 gap-4">
+        {/* 월별 총점 */}
+        <div className="bg-white rounded-2xl border border-slate-200 p-4 sm:p-6">
+          <h3 className="text-base font-bold text-slate-900 mb-1">월별 총점 추이</h3>
+          <p className="text-xs text-slate-500 mb-4">{teacher} 선생님의 월별 변화</p>
+          <div className="h-56">
+            <ResponsiveContainer width="100%" height="100%">
+              <LineChart data={chartData}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                <XAxis dataKey="month" tick={{ fontSize: 12 }} />
+                <YAxis tick={{ fontSize: 12 }} />
+                <Tooltip contentStyle={{ borderRadius: 8, fontSize: 12 }} />
+                <Line type="monotone" dataKey="총점" stroke={colors.primary} strokeWidth={3} dot={{ r: 5 }} />
+              </LineChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+
+        {/* 팀 평균 비교 (레이더) */}
+        <div className="bg-white rounded-2xl border border-slate-200 p-4 sm:p-6">
+          <h3 className="text-base font-bold text-slate-900 mb-1">팀 평균 대비</h3>
+          <p className="text-xs text-slate-500 mb-4">{latestMonth} · {team} 평균과 비교</p>
+          <div className="h-56">
+            <ResponsiveContainer width="100%" height="100%">
+              <RadarChart data={radarData}>
+                <PolarGrid stroke="#e2e8f0" />
+                <PolarAngleAxis dataKey="item" tick={{ fontSize: 11 }} />
+                <PolarRadiusAxis tick={{ fontSize: 10 }} />
+                <Radar name={teacher} dataKey={teacher} stroke={colors.primary} fill={colors.primary} fillOpacity={0.3} />
+                <Radar name="팀 평균" dataKey="팀 평균" stroke="#94a3b8" fill="#94a3b8" fillOpacity={0.15} />
+                <Legend wrapperStyle={{ fontSize: 12 }} />
+                <Tooltip contentStyle={{ fontSize: 12 }} />
+              </RadarChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+      </div>
+
+      {/* 항목별 표 */}
+      <div className="bg-white rounded-2xl border border-slate-200 p-4 sm:p-6">
+        <h3 className="text-base font-bold text-slate-900 mb-1">항목별 월별 점수</h3>
+        <p className="text-xs text-slate-500 mb-4">누적 합산 포함</p>
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-slate-200 text-slate-500 text-xs">
+                <th className="text-left py-2 pl-1">월</th>
+                {ITEMS.map(it => <th key={it} className="text-right py-2 px-1.5">{it}</th>)}
+                <th className="text-right py-2 pr-1 font-bold text-slate-700">총점</th>
+              </tr>
+            </thead>
+            <tbody>
+              {allMonths.map(m => {
+                const d = data[m]?.[teacher] || {};
+                return (
+                  <tr key={m} className="border-b border-slate-100">
+                    <td className="py-2 pl-1 font-medium">{m}</td>
+                    {ITEMS.map(it => (
+                      <td key={it} className="text-right py-2 px-1.5 text-slate-600">
+                        {d[it] === null || d[it] === undefined ? '-' : d[it]}
+                      </td>
+                    ))}
+                    <td className="text-right py-2 pr-1 font-bold" style={{ color: colors.primary }}>
+                      {d.총점 ?? '-'}
+                    </td>
+                  </tr>
+                );
+              })}
+              <tr className="bg-slate-50 font-semibold">
+                <td className="py-2 pl-1">누적</td>
+                {ITEMS.map(it => (
+                  <td key={it} className="text-right py-2 px-1.5 text-slate-700">{cumulative[it]}</td>
+                ))}
+                <td className="text-right py-2 pr-1 font-bold" style={{ color: colors.primary }}>{cumulative.총점}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* 항목별 추이 미니 차트 */}
+      <div className="bg-white rounded-2xl border border-slate-200 p-4 sm:p-6">
+        <h3 className="text-base font-bold text-slate-900 mb-4">항목별 월별 추이</h3>
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+          {ITEMS.map(item => (
+            <div key={item} className="bg-slate-50 rounded-lg p-3">
+              <div className="text-xs font-medium text-slate-600 mb-1">{item}</div>
+              <div className="h-16">
+                <ResponsiveContainer width="100%" height="100%">
+                  <LineChart data={itemTrend}>
+                    <Line type="monotone" dataKey={item} stroke={colors.primary} strokeWidth={2} dot={{ r: 2 }} />
+                    <Tooltip contentStyle={{ fontSize: 11, padding: '4px 8px' }} />
+                  </LineChart>
+                </ResponsiveContainer>
+              </div>
+              <div className="text-xs text-slate-500 mt-1">
+                {firstMonth}: {data[firstMonth]?.[teacher]?.[item] ?? '-'} → {latestMonth}: <span className="font-semibold text-slate-700">{data[latestMonth]?.[teacher]?.[item] ?? '-'}</span>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ============ 종합 평가 카드 (편집 가능) ============
+function NarrativeFeedbackCard({ narrative, colors, teacher, latestMonth, customFeedback, onSave, readOnly = false }) {
+  const [isEditing, setIsEditing] = useState(false);
+  const [editState, setEditState] = useState(null);
+
+  // 표시 내용 결정: 커스텀이 있으면 그것을, 없으면 자동 생성
+  const displayContent = useMemo(() => {
+    if (customFeedback && customFeedback.custom) {
+      return {
+        overall: customFeedback.custom.overall ?? narrative.overall,
+        goodPoints: customFeedback.custom.goodPoints ?? narrative.goodPoints,
+        improvements: customFeedback.custom.improvements ?? narrative.improvements,
+        closing: customFeedback.custom.closing ?? narrative.closing,
+      };
+    }
+    return {
+      overall: narrative.overall,
+      goodPoints: narrative.goodPoints,
+      improvements: narrative.improvements,
+      closing: narrative.closing,
+    };
+  }, [customFeedback, narrative]);
+
+  const memo = customFeedback?.memo || '';
+  const isCustomized = !!(customFeedback && customFeedback.custom);
+
+  // 선생님이나 월이 바뀌면 편집 모드 종료
+  useEffect(() => {
+    setIsEditing(false);
+    setEditState(null);
+  }, [teacher, latestMonth]);
+
+  if (!narrative.overall) return null;
+
+  // 마크다운 굵게 처리 (**텍스트**)
+  const renderRich = (text) => {
+    if (typeof text !== 'string') return text;
+    const parts = text.split(/(\*\*[^*]+\*\*)/g);
+    return parts.map((p, i) => {
+      if (p.startsWith('**') && p.endsWith('**')) {
+        return <strong key={i} className="font-semibold" style={{ color: colors.accent }}>{p.slice(2, -2)}</strong>;
+      }
+      return <span key={i}>{p}</span>;
+    });
+  };
+
+  const startEdit = () => {
+    setEditState({
+      overall: displayContent.overall,
+      goodPoints: displayContent.goodPoints.join('\n'),
+      improvements: displayContent.improvements.join('\n'),
+      closing: displayContent.closing,
+      memo: memo,
+    });
+    setIsEditing(true);
+  };
+
+  const saveEdit = () => {
+    const cleanList = (s) => s.split('\n').map(x => x.trim()).filter(x => x.length > 0);
+    const newCustom = {
+      overall: editState.overall.trim(),
+      goodPoints: cleanList(editState.goodPoints),
+      improvements: cleanList(editState.improvements),
+      closing: editState.closing.trim(),
+    };
+    const memoTrimmed = (editState.memo || '').trim();
+    onSave({
+      custom: newCustom,
+      memo: memoTrimmed
+    });
+    setIsEditing(false);
+    setEditState(null);
+  };
+
+  const cancelEdit = () => {
+    setIsEditing(false);
+    setEditState(null);
+  };
+
+  const resetToAuto = () => {
+    if (!confirm('자동 생성된 내용으로 복원하시겠습니까?\n수정하신 내용은 사라지고, 추가 메모는 유지됩니다.')) return;
+    onSave({
+      custom: null,
+      memo: memo
+    });
+    setIsEditing(false);
+    setEditState(null);
+  };
+
+  const textareaCls = "w-full p-3 text-sm rounded-lg border border-slate-300 bg-white/90 focus:outline-none focus:ring-2 leading-relaxed";
+  const focusRing = { boxShadow: `0 0 0 2px ${colors.primary}33` };
+
+  return (
+    <div
+      className="rounded-2xl p-5 sm:p-7 border shadow-sm"
+      style={{
+        background: `linear-gradient(135deg, #fffdf7 0%, ${colors.bg} 100%)`,
+        borderColor: colors.light
+      }}
+    >
+      {/* 헤더 */}
+      <div className="flex items-start justify-between mb-4 pb-4 border-b gap-2" style={{ borderColor: colors.light }}>
+        <div className="min-w-0">
+          <div className="text-xs font-medium flex items-center gap-2 flex-wrap" style={{ color: colors.accent }}>
+            💌 {latestMonth} 종합 평가
+            {isCustomized && (
+              <span className="px-1.5 py-0.5 text-[10px] font-semibold bg-amber-100 text-amber-700 rounded">✏️ 수정됨</span>
+            )}
+          </div>
+          <h3 className="text-lg font-bold text-slate-900 mt-1">{teacher} 선생님께</h3>
+        </div>
+        {!readOnly && (
+          <div className="flex items-center gap-2 shrink-0">
+            {!isEditing ? (
+              <button
+                onClick={startEdit}
+                className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-medium border rounded-lg bg-white/80 hover:bg-white transition"
+                style={{ borderColor: colors.light, color: colors.accent }}
+              >
+                ✏️ 편집
+              </button>
+            ) : (
+              <>
+                <button
+                  onClick={cancelEdit}
+                  className="px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-100 rounded-lg"
+                >
+                  취소
+                </button>
+                <button
+                  onClick={saveEdit}
+                  className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-medium text-white rounded-lg hover:opacity-90"
+                  style={{ backgroundColor: colors.primary }}
+                >
+                  💾 저장
+                </button>
+              </>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* 종합 평가 */}
+      <div className="mb-1">
+        {isEditing ? (
+          <>
+            <label className="block text-xs font-semibold text-slate-600 mb-1.5">📝 종합 평가</label>
+            <textarea
+              value={editState.overall}
+              onChange={(e) => setEditState({ ...editState, overall: e.target.value })}
+              rows={5}
+              className={textareaCls}
+              style={focusRing}
+            />
+          </>
+        ) : (
+          <div className="text-[15px] leading-[1.75] text-slate-700 whitespace-pre-line">
+            {displayContent.overall}
+          </div>
+        )}
+      </div>
+
+      {/* 좋은 점 / 보완할 점 */}
+      <div className="grid md:grid-cols-2 gap-4 mt-6">
+        {/* 좋은 점 */}
+        <div className="bg-white/80 rounded-xl p-4 border" style={{ borderColor: colors.light }}>
+          <h4 className="text-sm font-bold text-slate-900 mb-3 flex items-center gap-1.5">
+            <Star size={16} className="text-amber-500" />
+            이런 점이 정말 좋았어요
+          </h4>
+          {isEditing ? (
+            <>
+              <textarea
+                value={editState.goodPoints}
+                onChange={(e) => setEditState({ ...editState, goodPoints: e.target.value })}
+                rows={6}
+                placeholder="한 줄에 하나씩 작성해주세요"
+                className={textareaCls}
+                style={focusRing}
+              />
+              <p className="text-[11px] text-slate-400 mt-1">한 줄에 한 가지씩 작성해주세요</p>
+            </>
+          ) : (
+            <ul className="space-y-2.5">
+              {displayContent.goodPoints.map((point, i) => (
+                <li key={i} className="text-sm text-slate-700 leading-relaxed">
+                  {renderRich(point)}
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+
+        {/* 보완할 점 */}
+        <div className="bg-white/80 rounded-xl p-4 border" style={{ borderColor: colors.light }}>
+          <h4 className="text-sm font-bold text-slate-900 mb-3 flex items-center gap-1.5">
+            <Target size={16} className="text-blue-500" />
+            함께 보완해 봤으면 하는 부분
+          </h4>
+          {isEditing ? (
+            <>
+              <textarea
+                value={editState.improvements}
+                onChange={(e) => setEditState({ ...editState, improvements: e.target.value })}
+                rows={6}
+                placeholder="한 줄에 하나씩 작성해주세요"
+                className={textareaCls}
+                style={focusRing}
+              />
+              <p className="text-[11px] text-slate-400 mt-1">한 줄에 한 가지씩 작성해주세요</p>
+            </>
+          ) : (
+            <ul className="space-y-2.5">
+              {displayContent.improvements.map((point, i) => (
+                <li key={i} className="text-sm text-slate-700 leading-relaxed">
+                  {renderRich(point)}
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      </div>
+
+      {/* 마무리 격려 */}
+      <div className="mt-6">
+        {isEditing ? (
+          <>
+            <label className="block text-xs font-semibold text-slate-600 mb-1.5">💪 마무리 격려</label>
+            <textarea
+              value={editState.closing}
+              onChange={(e) => setEditState({ ...editState, closing: e.target.value })}
+              rows={3}
+              className={textareaCls}
+              style={focusRing}
+            />
+          </>
+        ) : (
+          <div
+            className="p-4 rounded-xl text-[15px] leading-[1.7] font-medium"
+            style={{
+              backgroundColor: colors.light,
+              color: colors.accent
+            }}
+          >
+            {displayContent.closing}
+          </div>
+        )}
+      </div>
+
+      {/* 원장 추가 메모 */}
+      {isEditing ? (
+        <div className="mt-6">
+          <label className="block text-xs font-semibold text-slate-600 mb-1.5">🗒️ 원장 추가 메모 (선택사항)</label>
+          <textarea
+            value={editState.memo}
+            onChange={(e) => setEditState({ ...editState, memo: e.target.value })}
+            rows={4}
+            placeholder="자유롭게 추가로 남기고 싶은 코멘트를 작성해주세요. 면담 시 메모, 격려 메시지, 개인적인 응원 등 어떤 내용이든 좋아요."
+            className={textareaCls}
+            style={focusRing}
+          />
+        </div>
+      ) : memo ? (
+        <div className="mt-6 p-4 rounded-xl border-l-4 bg-white/70 border" style={{ borderColor: colors.light, borderLeftColor: colors.primary }}>
+          <div className="text-xs font-semibold text-slate-500 mb-2">🗒️ 원장 추가 메모</div>
+          <div className="text-sm text-slate-700 leading-relaxed whitespace-pre-line">{memo}</div>
+        </div>
+      ) : null}
+
+      {/* 편집 모드 하단: 복원 버튼 */}
+      {isEditing && isCustomized && (
+        <div className="mt-5 pt-4 border-t flex justify-end" style={{ borderColor: colors.light }}>
+          <button
+            onClick={resetToAuto}
+            className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-medium text-slate-500 hover:text-rose-600 hover:bg-rose-50 rounded-lg"
+          >
+            🔄 자동 생성으로 복원
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ============ 자동 피드백 카드 ============
+function FeedbackCard({ feedback, colors, teacher }) {
+  const hasContent = feedback.rankings.length > 0 || feedback.strengths.length > 0 || feedback.weaknesses.length > 0 || feedback.changes.length > 0;
+  if (!hasContent) return null;
+
+  return (
+    <div className="bg-white rounded-2xl border border-slate-200 p-4 sm:p-6">
+      <h3 className="text-base font-bold text-slate-900 mb-4 flex items-center gap-2">
+        <Sparkles size={18} className="text-amber-500" />
+        {teacher} 선생님 자동 피드백
+      </h3>
+
+      <div className="grid sm:grid-cols-2 gap-3">
+        {/* 순위 (상위) */}
+        {feedback.rankings.filter(r => r.type === 'top').length > 0 && (
+          <div className="p-3 bg-amber-50 border border-amber-100 rounded-lg">
+            <div className="text-xs font-semibold text-amber-700 mb-2 flex items-center gap-1"><Trophy size={14} /> 상위 항목</div>
+            <ul className="space-y-1">
+              {feedback.rankings.filter(r => r.type === 'top').map(r => (
+                <li key={r.item} className="text-sm text-slate-700 flex items-center gap-2">
+                  <span className="text-amber-600">{rankEmoji(r.rank)}</span>
+                  <span className="font-medium">{r.item}</span>
+                  <span className="text-slate-500">({r.value})</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+
+        {/* 강점 */}
+        {feedback.strengths.length > 0 && (
+          <div className="p-3 bg-emerald-50 border border-emerald-100 rounded-lg">
+            <div className="text-xs font-semibold text-emerald-700 mb-2 flex items-center gap-1"><ThumbsUp size={14} /> 팀 평균 대비 강점</div>
+            <ul className="space-y-1">
+              {feedback.strengths.slice(0, 3).map(s => (
+                <li key={s.item} className="text-sm text-slate-700">
+                  <span className="font-medium">{s.item}</span>
+                  <span className="text-slate-500 ml-2">{s.value} (팀평균 {s.teamAvg})</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+
+        {/* 약점 */}
+        {feedback.weaknesses.length > 0 && (
+          <div className="p-3 bg-rose-50 border border-rose-100 rounded-lg">
+            <div className="text-xs font-semibold text-rose-700 mb-2 flex items-center gap-1"><AlertTriangle size={14} /> 보완이 필요한 항목</div>
+            <ul className="space-y-1">
+              {feedback.weaknesses.slice(0, 3).map(w => (
+                <li key={w.item} className="text-sm text-slate-700">
+                  <span className="font-medium">{w.item}</span>
+                  <span className="text-slate-500 ml-2">{w.value} (팀평균 {w.teamAvg})</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+
+        {/* 변화 */}
+        {feedback.changes.length > 0 && (
+          <div className="p-3 bg-blue-50 border border-blue-100 rounded-lg">
+            <div className="text-xs font-semibold text-blue-700 mb-2 flex items-center gap-1"><TrendingUp size={14} /> 전월 대비 변화</div>
+            <ul className="space-y-1">
+              {feedback.changes.map((c, i) => (
+                <li key={i} className="text-sm text-slate-700">
+                  {c.kind === '총점' ? (
+                    <span>총점 {c.prev}→{c.latest} <span className={c.change >= 0 ? 'text-emerald-600 font-semibold' : 'text-red-500 font-semibold'}>({c.change >= 0 ? '+' : ''}{c.change})</span></span>
+                  ) : c.kind === '개선' ? (
+                    <span><span className="text-emerald-600">↑</span> <span className="font-medium">{c.item}</span> {c.change >= 0 ? '+' : ''}{c.change}점 향상</span>
+                  ) : (
+                    <span><span className="text-rose-600">↓</span> <span className="font-medium">{c.item}</span> {c.change}점 하락</span>
+                  )}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ============ 팀별 뷰 ============
+function TeamView({ data, teams, allMonths, teamMonthlyTotal, allTeachers, selectedTeam, setSelectedTeam, onCopyLink, isShared = false }) {
+  const team = selectedTeam || Object.keys(teams)[0];
+  const members = teams[team] || [];
+  const colors = teamColor(team);
+  const latestMonth = allMonths[allMonths.length - 1];
+  const firstMonth = allMonths[0];
+
+  const memberChart = allMonths.map(m => ({
+    month: m,
+    ...Object.fromEntries(members.map(name => [name, data[m]?.[name]?.총점 ?? 0]))
+  }));
+
+  // 팀 순위
+  const teamRank = Object.entries(teamMonthlyTotal).sort((a, b) => (b[1][latestMonth] ?? 0) - (a[1][latestMonth] ?? 0)).findIndex(([t]) => t === team) + 1;
+  // 팀원 순위
+  const memberRanking = members.map(name => ({
+    name,
+    score: data[latestMonth]?.[name]?.총점 ?? 0
+  })).sort((a, b) => b.score - a.score);
+
+  const colorPalette = ['#2563eb', '#16a34a', '#f59e0b', '#ec4899', '#8b5cf6', '#06b6d4'];
+
+  return (
+    <div className="space-y-6">
+      {/* 팀 선택 (공유 모드에서는 숨김) */}
+      {!isShared && (
+        <div className="bg-white rounded-2xl border border-slate-200 p-4 sm:p-5">
+          <div className="flex items-center justify-between flex-wrap gap-3">
+            <div className="text-sm font-medium text-slate-700">팀 선택</div>
+            <button onClick={() => onCopyLink(team)}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-slate-700 border border-slate-300 rounded-lg hover:bg-slate-50">
+              <Link2 size={14} /> {team} 링크 복사
+            </button>
+          </div>
+          <div className="mt-3 flex gap-2 flex-wrap">
+            {Object.keys(teams).map(tname => {
+              const c = teamColor(tname);
+              return (
+                <button key={tname} onClick={() => setSelectedTeam(tname)}
+                  className="px-4 py-2 rounded-lg text-sm font-medium transition border"
+                  style={{
+                    backgroundColor: tname === team ? c.primary : 'white',
+                    borderColor: tname === team ? c.primary : c.light,
+                    color: tname === team ? 'white' : c.accent
+                  }}>
+                  {c.emoji} {tname}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* 팀 헤더 */}
+      <div className="rounded-2xl p-5 sm:p-7" style={{ backgroundColor: colors.bg, border: `1px solid ${colors.light}` }}>
+        <div className="flex items-center justify-between flex-wrap gap-4">
+          <div>
+            <div className="text-xs font-medium" style={{ color: colors.accent }}>
+              {colors.emoji} {rankEmoji(teamRank)}
+            </div>
+            <h2 className="text-2xl sm:text-3xl font-bold text-slate-900 mt-2">{team}</h2>
+            <div className="text-sm text-slate-600 mt-1">{members.join(' · ')}</div>
+          </div>
+          <div className="text-right">
+            <div className="text-xs text-slate-500">{latestMonth} 팀 총점</div>
+            <div className="text-4xl font-bold" style={{ color: colors.primary }}>
+              {teamMonthlyTotal[team]?.[latestMonth] ?? 0}
+            </div>
+            <div className="text-sm mt-1" style={{ color: colors.accent }}>
+              {firstMonth} 대비 {((teamMonthlyTotal[team]?.[latestMonth] ?? 0) - (teamMonthlyTotal[team]?.[firstMonth] ?? 0)) >= 0 ? '+' : ''}
+              {(teamMonthlyTotal[team]?.[latestMonth] ?? 0) - (teamMonthlyTotal[team]?.[firstMonth] ?? 0)}점
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* 팀 월별 총점 카드 */}
+      <div className="bg-white rounded-2xl border border-slate-200 p-4 sm:p-6">
+        <h3 className="text-base font-bold text-slate-900 mb-4">월별 팀 총점</h3>
+        <div className="grid grid-cols-4 gap-2 sm:gap-3">
+          {allMonths.map(m => (
+            <div key={m} className="text-center p-3 rounded-xl" style={{ backgroundColor: m === latestMonth ? colors.light : '#f8fafc' }}>
+              <div className="text-xs text-slate-500">{m}</div>
+              <div className="text-2xl font-bold mt-1" style={{ color: m === latestMonth ? colors.accent : '#475569' }}>
+                {teamMonthlyTotal[team]?.[m] ?? 0}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* 팀원 추이 차트 */}
+      <div className="bg-white rounded-2xl border border-slate-200 p-4 sm:p-6">
+        <h3 className="text-base font-bold text-slate-900 mb-4">팀원별 월별 추이</h3>
+        <div className="h-64 sm:h-80">
+          <ResponsiveContainer width="100%" height="100%">
+            <LineChart data={memberChart}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+              <XAxis dataKey="month" tick={{ fontSize: 12 }} />
+              <YAxis tick={{ fontSize: 12 }} />
+              <Tooltip contentStyle={{ borderRadius: 8, fontSize: 12 }} />
+              <Legend wrapperStyle={{ fontSize: 12 }} />
+              {members.map((name, idx) => (
+                <Line key={name} type="monotone" dataKey={name} stroke={colorPalette[idx % 6]} strokeWidth={2} dot={{ r: 3 }} />
+              ))}
+            </LineChart>
+          </ResponsiveContainer>
+        </div>
+      </div>
+
+      {/* 팀 내 순위 */}
+      <div className="bg-white rounded-2xl border border-slate-200 p-4 sm:p-6">
+        <h3 className="text-base font-bold text-slate-900 mb-4">팀 내 순위 ({latestMonth})</h3>
+        <div className="space-y-2">
+          {memberRanking.map((m, idx) => (
+            <div key={m.name} className="flex items-center justify-between p-3 rounded-lg" style={{ backgroundColor: idx === 0 ? colors.light : '#f8fafc' }}>
+              <div className="flex items-center gap-3">
+                <span className="font-bold text-lg w-8">{rankEmoji(idx + 1)}</span>
+                <span className="font-medium text-slate-900">{m.name}</span>
+              </div>
+              <div className="text-lg font-bold" style={{ color: colors.primary }}>{m.score}점</div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* 팀원별 상세 카드 */}
+      <div className="grid sm:grid-cols-2 gap-4">
+        {members.map(name => {
+          const cumulative = calcCumulative(data, name, allMonths);
+          return (
+            <div key={name} className="bg-white rounded-2xl border border-slate-200 p-4 sm:p-5">
+              <h4 className="font-bold text-slate-900 text-base">{name}</h4>
+              <div className="mt-3 space-y-1.5">
+                {allMonths.map(m => {
+                  const score = data[m]?.[name]?.총점;
+                  return (
+                    <div key={m} className="flex justify-between text-sm">
+                      <span className="text-slate-500">{m}</span>
+                      <span className="font-semibold" style={{ color: m === latestMonth ? colors.primary : '#475569' }}>{score ?? '-'}점</span>
+                    </div>
+                  );
+                })}
+                <div className="flex justify-between text-sm pt-2 mt-2 border-t border-slate-100">
+                  <span className="text-slate-700 font-medium">누적</span>
+                  <span className="font-bold" style={{ color: colors.accent }}>{cumulative.총점}점</span>
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ============ 항목별 순위 뷰 ============
+function RankingsView({ data, teams, allMonths, allTeachers, latestMonth, firstMonth }) {
+  // 각 항목별: 상위 4명 + 누적 표
+  return (
+    <div className="space-y-6">
+      <div className="bg-white rounded-2xl border border-slate-200 p-4 sm:p-6">
+        <h2 className="text-base font-bold text-slate-900 mb-1">항목별 순위</h2>
+        <p className="text-xs text-slate-500 mb-4">{latestMonth} 기준 상위 · 누적 (1~{latestMonth})</p>
+      </div>
+
+      <div className="grid md:grid-cols-2 gap-4">
+        {ITEMS.map(item => {
+          // 최신월 순위
+          const latestList = allTeachers.map(name => ({
+            name,
+            value: data[latestMonth]?.[name]?.[item] ?? 0,
+            team: getTeamOf(name, teams),
+            totalScore: data[latestMonth]?.[name]?.총점 ?? 0
+          })).sort((a, b) => b.value - a.value);
+
+          // 누적
+          const cumulativeList = allTeachers.map(name => {
+            const sum = allMonths.reduce((acc, m) => acc + ((data[m]?.[name]?.[item]) ?? 0), 0);
+            return { name, value: sum, team: getTeamOf(name, teams) };
+          }).sort((a, b) => b.value - a.value);
+
+          const top4 = latestList.slice(0, 4);
+          // 음수 항목은 누적의 의미가 다름
+          const isNegativeItem = ITEM_POLARITY[item] === -1;
+
+          return (
+            <div key={item} className="bg-white rounded-2xl border border-slate-200 p-4 sm:p-5">
+              <h3 className="text-sm font-bold text-slate-900 mb-3">
+                <span className="text-amber-500">🏆</span> {item} 순위
+              </h3>
+
+              <div className="space-y-3">
+                <div>
+                  <div className="text-xs font-medium text-slate-500 mb-1.5">{latestMonth} 상위 4명</div>
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="text-slate-500 text-xs border-b border-slate-100">
+                        <th className="text-left py-1 font-normal">이름</th>
+                        <th className="text-right py-1 font-normal">{item}</th>
+                        <th className="text-right py-1 font-normal">{latestMonth} 총점</th>
+                        <th className="text-right py-1 font-normal">순위</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {top4.map((t, idx) => {
+                        const colors = teamColor(t.team);
+                        return (
+                          <tr key={t.name} className="border-b border-slate-50">
+                            <td className="py-1.5 flex items-center gap-1.5">
+                              <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: colors.primary }}></span>
+                              <span className="font-medium">{t.name}</span>
+                            </td>
+                            <td className="text-right py-1.5 text-slate-700">{t.value >= 0 ? '+' : ''}{t.value}</td>
+                            <td className="text-right py-1.5 text-slate-500">{t.totalScore}</td>
+                            <td className="text-right py-1.5 text-amber-600 font-semibold">{rankEmoji(idx + 1)}</td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+
+                <div>
+                  <div className="text-xs font-medium text-slate-500 mb-1.5">
+                    {isNegativeItem ? `${item} 누적 (음수가 많을수록 문제)` : `${item} 누적`}
+                  </div>
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="text-slate-500 text-xs border-b border-slate-100">
+                        <th className="text-left py-1 font-normal">이름</th>
+                        {allMonths.map(m => <th key={m} className="text-right py-1 font-normal">{m}</th>)}
+                        <th className="text-right py-1 font-normal">누적</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {(isNegativeItem ? cumulativeList.slice().reverse() : cumulativeList).slice(0, 4).map(t => (
+                        <tr key={t.name} className="border-b border-slate-50">
+                          <td className="py-1.5 font-medium">{t.name}</td>
+                          {allMonths.map(m => (
+                            <td key={m} className="text-right py-1.5 text-slate-600">
+                              {data[m]?.[t.name]?.[item] ?? '-'}
+                            </td>
+                          ))}
+                          <td className="text-right py-1.5 font-bold text-slate-900">{t.value}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ============ 공유 뷰 (특정 선생님/팀만) ============
+function ShareView({ shareMode, data, teams, allMonths, allTeachers, teacherMonthlyTotal, teamMonthlyTotal, customFeedbacks }) {
+  const isTeacher = shareMode.kind === 'teacher';
+  return (
+    <div className="min-h-screen bg-slate-50" style={{ fontFamily: "'Noto Sans KR', sans-serif" }}>
+      <header className="bg-white border-b border-slate-200">
+        <div className="max-w-5xl mx-auto px-4 sm:px-6 py-4 flex items-center justify-between flex-wrap gap-3">
+          <div>
+            <div className="text-xs text-slate-500 flex items-center gap-1.5">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+              개인 공유 화면 (읽기 전용)
+            </div>
+            <h1 className="text-lg font-bold text-slate-900">{shareMode.name} {isTeacher ? '선생님' : ''}</h1>
+          </div>
+        </div>
+      </header>
+      <main className="max-w-5xl mx-auto px-4 sm:px-6 py-6">
+        {isTeacher ? (
+          <TeacherView data={data} teams={teams} allMonths={allMonths} allTeachers={allTeachers}
+            teacherMonthlyTotal={teacherMonthlyTotal}
+            selectedTeacher={shareMode.name} setSelectedTeacher={() => {}}
+            onCopyLink={() => {}}
+            customFeedbacks={customFeedbacks || {}} onSaveCustomFeedback={() => {}}
+            readOnly={true} isShared={true} />
+        ) : (
+          <TeamView data={data} teams={teams} allMonths={allMonths} teamMonthlyTotal={teamMonthlyTotal}
+            allTeachers={allTeachers}
+            selectedTeam={shareMode.name} setSelectedTeam={() => {}}
+            onCopyLink={() => {}}
+            isShared={true} />
+        )}
+        <div className="mt-8 p-4 bg-slate-100 rounded-xl text-xs text-slate-500 text-center">
+          이 페이지는 {shareMode.name} {isTeacher ? '선생님' : ''}의 개인 평가 공유 페이지입니다.<br/>
+          다른 분들의 평가 내용은 포함되어 있지 않습니다.
+        </div>
+      </main>
+    </div>
+  );
+}
+
+// ============ 데이터 관리 뷰 ============
+function ManageView({ data, allMonths, onDeleteMonth, onExport, onImport, onReset, onUpload }) {
+  return (
+    <div className="space-y-6">
+      <div className="bg-white rounded-2xl border border-slate-200 p-5 sm:p-6">
+        <h2 className="text-base font-bold text-slate-900">데이터 관리</h2>
+        <p className="text-sm text-slate-500 mt-1">매달 정리한 엑셀 파일을 업로드하거나, 데이터를 백업/복원할 수 있습니다</p>
+        <div className="mt-4 grid sm:grid-cols-2 gap-3">
+          <button onClick={onUpload} className="flex items-center gap-2 px-4 py-3 bg-slate-900 text-white text-sm font-medium rounded-lg hover:bg-slate-800">
+            <FileUp size={16} /> 엑셀 업로드
+          </button>
+          <button onClick={onExport} className="flex items-center gap-2 px-4 py-3 border border-slate-300 text-sm font-medium rounded-lg hover:bg-slate-50">
+            <Download size={16} /> JSON 백업 다운로드
+          </button>
+          <button onClick={onImport} className="flex items-center gap-2 px-4 py-3 border border-slate-300 text-sm font-medium rounded-lg hover:bg-slate-50">
+            <Upload size={16} /> JSON 백업에서 복원
+          </button>
+          <button onClick={onReset} className="flex items-center gap-2 px-4 py-3 border border-red-300 text-red-600 text-sm font-medium rounded-lg hover:bg-red-50">
+            <RefreshCw size={16} /> 초기 데이터로 리셋
+          </button>
+        </div>
+      </div>
+      <div className="bg-white rounded-2xl border border-slate-200 p-5 sm:p-6">
+        <h2 className="text-base font-bold text-slate-900">저장된 월별 데이터 ({allMonths.length}개)</h2>
+        {allMonths.length === 0 ? (
+          <p className="mt-3 text-sm text-slate-500">아직 저장된 데이터가 없습니다.</p>
+        ) : (
+          <div className="mt-4 space-y-2">
+            {allMonths.map(m => {
+              const teacherCount = Object.keys(data[m] || {}).length;
+              return (
+                <div key={m} className="flex items-center justify-between p-3 bg-slate-50 rounded-lg">
+                  <div>
+                    <div className="font-medium text-slate-900">{m}</div>
+                    <div className="text-xs text-slate-500 mt-0.5">{teacherCount}명 데이터</div>
+                  </div>
+                  <button onClick={() => onDeleteMonth(m)} className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-red-600 hover:bg-red-50 rounded-lg">
+                    <Trash2 size={14} /> 삭제
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+      <div className="bg-blue-50 border border-blue-200 rounded-2xl p-5 sm:p-6">
+        <h3 className="text-sm font-bold text-blue-900">💡 사용 안내</h3>
+        <ul className="mt-3 space-y-2 text-sm text-blue-800">
+          <li>• 매달 정리한 <code className="px-1.5 py-0.5 bg-blue-100 rounded text-xs">X월_정리_완료.xlsx</code> 파일을 업로드하면 자동으로 반영됩니다</li>
+          <li>• 같은 월을 다시 업로드하면 기존 데이터가 덮어쓰기됩니다</li>
+          <li>• 데이터는 브라우저에 영구 저장되므로 새로고침해도 유지됩니다</li>
+          <li>• <strong>JSON 백업</strong>: 정기적으로 백업해두시면 다른 기기에서도 동일한 데이터를 사용할 수 있습니다</li>
+          <li>• 선생님/팀 화면에서 <strong>🔗 링크 복사</strong>로 개별 공유 링크를 만들 수 있습니다</li>
+        </ul>
+      </div>
+    </div>
+  );
+}
+
+
+// 로딩 화면 숨기기 + 앱 마운트
+document.getElementById('loader').classList.add('hidden');
+ReactDOM.createRoot(document.getElementById('root')).render(<Dashboard />);
+</script>
+</body>
+</html>
